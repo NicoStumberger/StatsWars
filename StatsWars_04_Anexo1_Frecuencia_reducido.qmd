@@ -1,0 +1,770 @@
+---
+title: "Anexo X: Frecuencia de conflictos"
+format:
+  docx:
+    reference-doc: Res CS 2_23 - Carátula de TF UNTREF.docx
+execute:
+  warning: false
+  message: false
+  error: false
+  echo: false
+  engine: r
+---
+
+```{r}
+#| include: false
+
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(survival)
+library(survminer)
+library(broom)
+library(knitr)
+library(gt)
+
+
+
+theme_set(theme_minimal())
+
+# Función para asegurar 300 dpi en todas las figuras
+knitr::opts_chunk$set(
+  fig.dpi = 300,
+  fig.width = 5,
+  fig.height = 3
+)
+
+# Input ------------------------------------------------------------------
+anu_frec_cow <- readRDS("data_gold/anu_frec_cow.rds")
+anu_frec_sdq <- readRDS("data_gold/anu_frec_sdq.rds")
+anu_frec_ucdp <- readRDS("data_gold/anu_frec_ucdp.rds")
+
+conf_durint_cow <- readRDS("data_gold/conf_durint_cow.rds")
+conf_durint_sdq <- readRDS("data_gold/conf_durint_sdq.rds")
+conf_durint_ucdp <- readRDS("data_gold/conf_durint_ucdp.rds")
+
+time_between_cow <- readRDS("data_gold/time_between_cow.rds")
+time_between_sdq <- readRDS("data_gold/time_between_sdq.rds")
+time_between_ucdp <- readRDS("data_gold/time_between_ucdp.rds")
+```
+
+# Análisis Exploratorio de Datos
+
+## Serie temporal
+
+### SDQ
+
+```{r}
+#| echo: false
+
+ggplot(anu_frec_sdq, aes(year, n_conflictos_sdq)) +
+  geom_line() +
+  geom_point() +
+  labs(
+  x = "Año",
+  y = "Número de conflictos (SDQ)"
+) +
+  theme_minimal()
+```
+
+### COW
+
+```{r}
+#| echo: false
+
+ggplot(anu_frec_cow, aes(year, n_conflictos_cow)) +
+  geom_line() +
+  geom_point() +
+  labs(
+  x = "Año",
+  y = "Número de conflictos (COW)"
+) +
+  theme_minimal()
+```
+
+### UCDP
+
+```{r}
+#| echo: false
+
+ggplot(anu_frec_ucdp, aes(year, n_conflictos_ucdp)) +
+  geom_line() +
+  geom_point() +
+  labs(
+  x = "Año",
+  y = "Número de conflictos (UCDP)"
+) +
+  theme_minimal()
+```
+
+### Comparación entre SDQ, COW y UCDP
+
+```{r}
+#| echo: false
+anu_frec_all <- anu_frec_cow |>
+  select(year, n_conflictos_cow) |>
+  full_join(anu_frec_ucdp |> select(year, n_conflictos_ucdp), by = "year") |>
+  full_join(anu_frec_sdq |> select(year, n_conflictos_sdq), by = "year")
+
+anu_frec_all_long <- anu_frec_all |>
+  pivot_longer(
+    cols = starts_with("n_conflictos"),
+    names_to = "dataset",
+    values_to = "n_conflictos"
+  )
+
+anu_frec_all_long$dataset <- recode(
+  anu_frec_all_long$dataset,
+  "n_conflictos_cow" = "COW",
+  "n_conflictos_ucdp" = "UCDP",
+  "n_conflictos_sdq" = "SDQ"
+)
+
+
+ggplot(anu_frec_all_long, aes(x = year, y = n_conflictos, color = dataset)) +
+  geom_line() +
+  geom_point(size = 1.5) +
+  theme_minimal() +
+  labs(
+    # title = "Frecuencia anual de conflictos por dataset",
+    x = "Año",
+    y = "Número de conflictos",
+    color = "Dataset"
+  )
+```
+
+## Frecuencia por fase del sistema internacional
+
+### SDQ
+
+```{r}
+#| echo: false
+
+anu_frec_sdq |>
+  # filter(!is.na(phase)) |>
+  group_by(phase) |>
+  summarise(
+    mean_conflicts = mean(n_conflictos_sdq, na.rm = TRUE),
+    n = n()
+  )
+
+anu_frec_sdq |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, n_conflictos_sdq)) +
+  geom_boxplot() +
+  labs(
+    x = "Fase",
+    y = "Número de conflictos (SDQ)"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+### COW
+
+```{r}
+#| echo: false
+anu_frec_cow %>%
+  group_by(phase) %>%
+  summarise(
+    mean_conflicts = mean(n_conflictos_cow, na.rm = TRUE),
+    n = n()
+  )
+
+anu_frec_cow |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, n_conflictos_cow)) +
+  geom_boxplot() +
+  labs(
+    x = "Fase",
+    y = "Número de conflictos (COW)"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+### UCDP
+
+```{r}
+#| echo: false
+anu_frec_ucdp |>
+  group_by(phase) |>
+  summarise(
+    mean_conflicts = mean(n_conflictos_ucdp, na.rm = TRUE),
+    n = n()
+  )
+
+anu_frec_ucdp |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, n_conflictos_ucdp)) +
+  geom_boxplot() +
+  labs(
+    x = "Fase",
+    y = "Número de conflictos (UCDP)"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+## Frecuencia antes/después de shocks
+
+### SDQ
+
+```{r}
+#| echo: false
+anu_frec_sdq |>
+  select(year, n_conflictos_sdq, shock_1815, shock_1914, shock_1939, shock_1945) |>
+  pivot_longer(
+    cols = starts_with("shock_"),
+    names_to = "shock",
+    values_to = "valor"
+  ) |>
+  ggplot(aes(factor(valor), n_conflictos_sdq)) +
+  geom_boxplot() +
+  facet_wrap(~ shock, scales = "free") +
+  labs(
+    x = "Pre (0) / Post (1)",
+    y = "Número de conflictos (SDQ)"
+  ) +
+  theme_minimal()
+```
+
+### COW
+
+```{r}
+#| echo: false
+anu_frec_cow |>
+  select(n_conflictos_cow, shock_1914, shock_1939, shock_1945, shock_1991, shock_2001) |>
+  pivot_longer(
+    cols = starts_with("shock_"),
+    names_to = "shock",
+    values_to = "valor"
+  ) |>
+  ggplot(aes(factor(valor), n_conflictos_cow)) +
+  geom_boxplot() +
+  facet_wrap(~ shock, scales = "free") +
+  labs(
+    x = "Pre (0) / Post (1)",
+    y = "Número de conflictos (COW)"
+  ) +
+  theme_minimal()
+
+```
+
+### UCDP
+
+```{r}
+#| echo: false
+anu_frec_ucdp |>
+  select(n_conflictos_ucdp, shock_1945, shock_1991, shock_2001) |>
+  pivot_longer(
+    cols = starts_with("shock_"),
+    names_to = "shock",
+    values_to = "valor"
+  ) |>
+  ggplot(aes(factor(valor), n_conflictos_ucdp)) +
+  geom_boxplot() +
+  facet_wrap(~ shock, scales = "free") +
+  labs(
+    x = "Pre (0) / Post (1)",
+    y = "Número de conflictos (UCDP)"
+  ) +
+  theme_minimal()
+```
+
+## Rimland vs no rimland (solo COW/UCDP)
+
+### COW
+
+```{r}
+#| echo: false
+ggplot(anu_frec_cow, aes(year)) +
+  geom_line(aes(y = n_rimland_1, color = "Rimland")) +
+  geom_line(aes(y = n_rimland_0, color = "No Rimland")) +
+  labs(
+    x = "Año",
+    y = "Número de conflictos (COW)"
+  ) +
+  theme_minimal()
+```
+
+### UCDP
+
+```{r}
+#| echo: false
+
+ggplot(anu_frec_ucdp, aes(year)) +
+  geom_line(aes(y = n_rimland_1, color = "Rimland")) +
+  geom_line(aes(y = n_rimland_0, color = "No Rimland")) +
+  labs(
+    x = "Año",
+    y = "Número de conflictos (UCDP)"
+  ) +
+  theme_minimal()
+```
+
+# Revisión de supuestos para Poisson
+
+## Equidispersión (media ≈ varianza)
+
+En los tres datasets la varianza supera a la media, lo que indica sobredispersión y justifica el uso de quasi-Poisson y binomial negativa como especificaciones alternativas.
+
+SDQ:
+```{r}
+#| echo: false
+# SDQ
+mean(anu_frec_sdq$n_conflictos_sdq, na.rm = TRUE)
+var(anu_frec_sdq$n_conflictos_sdq, na.rm = TRUE)
+```
+
+COW:
+```{r}
+#| echo: false
+# COW
+mean(anu_frec_cow$n_conflictos_cow, na.rm = TRUE)
+var(anu_frec_cow$n_conflictos_cow, na.rm = TRUE)
+```
+
+UCDP:
+```{r}
+#| echo: false
+# UCDP
+mean(anu_frec_ucdp$n_conflictos_ucdp, na.rm = TRUE)
+var(anu_frec_ucdp$n_conflictos_ucdp, na.rm = TRUE)
+```
+
+La interpretación estándar establece que: 
+
+- una relación aproximada entre media y varianza es consistente con el modelo Poisson; 
+- una varianza sustancialmente mayor que la media indica sobredispersión, lo que sugiere el uso de variantes como quasi‑Poisson o binomial negativa; 
+- una varianza menor que la media implica subdispersión, fenómeno poco frecuente en estudios de conflicto.
+
+## Independencia entre observaciones
+
+La autocorrelación de las series anuales se evaluó mediante ACF; la mayoría de los coeficientes se encuentran dentro de los intervalos de confianza, lo que respalda el supuesto de independencia.
+
+```{r}
+#| echo: false
+
+acf(anu_frec_sdq$n_conflictos_sdq)
+
+acf(anu_frec_cow$n_conflictos_cow)
+
+acf(anu_frec_ucdp$n_conflictos_ucdp)
+
+```
+
+## Linealidad en el link log
+
+La decisión de modelar la geografía únicamente como Rimland/No Rimland reduce el riesgo de inestabilidad por categorías con muy pocos casos.
+
+# Modelos estadísticos
+
+## SDQ
+
+```{r}
+#| echo: false
+df <- anu_frec_sdq |>
+  filter(!is.na(n_conflictos_sdq)) |>
+  mutate(
+    phase = recode(
+      phase,
+      "unipolaridad_tardia_multipolaridad_emergente" = "unipolaridad_tardia"
+    )
+  ) |>
+  mutate(
+    phase = factor(phase),
+    shock_1939 = factor(shock_1939),
+    shock_1945 = factor(shock_1945)
+  )
+```
+
+### Modelo nulo (solo intercepto)
+
+```{r}
+m0 <- glm(n_conflictos_sdq ~ 1, family = poisson, data = df)
+
+broom::tidy(m0, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con fases del sistema internacional
+
+```{r}
+m_phase <- glm(n_conflictos_sdq ~ phase, family = poisson, data = df)
+
+broom::tidy(m_phase, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con shocks históricos
+
+#### Shock 1939 (inicio de la Segunda Guerra Mundial)
+
+```{r}
+# Shock 1939
+m_39 <- glm(n_conflictos_sdq ~ shock_1939, family = poisson, data = df)
+
+broom::tidy(m_39, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+#### Shock 1945 (fin de la Segunda Guerra Mundial)
+
+```{r}
+# Shock 1945
+m_45 <- glm(n_conflictos_sdq ~ shock_1945, family = poisson, data = df)
+
+broom::tidy(m_45, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo combinado: fases + shocks
+
+```{r}
+m_full <- glm(
+  n_conflictos_sdq ~ phase + shock_1939 + shock_1945,
+  family = poisson,
+  data = df
+)
+
+broom::tidy(m_full, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelos con corrección por sobredispersión
+
+```{r}
+# Poisson deviance / df
+# deviance(m_full) / df.residual(m_full)
+
+# Interpretación:
+# - Si > 1.5 → sobredispersión clara
+# - Si > 2 → usar NegBin sí o sí
+```
+
+
+```{r}
+# Quasi‑Poisson
+m_full_qp <- glm(
+  n_conflictos_sdq ~ phase + shock_1939 + shock_1945,
+  family = quasipoisson,
+  data = df
+)
+
+broom::tidy(m_full_qp, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# - Los coeficientes son iguales.
+# - Los errores estándar aumentan.
+# - Ninguna variable es significativa.
+# Esto confirma que el Poisson clásico inflaba la significancia
+```
+
+
+```{r}
+# Negative Binomial
+m_full_nb <- MASS::glm.nb(
+  n_conflictos_sdq ~ phase + shock_1939 + shock_1945,
+  data = df
+)
+
+broom::tidy(m_full_nb, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Comparación de modelos
+
+```{r}
+#| echo: false
+
+AIC(m0, m_phase, m_39, m_45, m_full, m_full_nb)
+```
+
+## COW
+
+```{r}
+#| echo: false
+
+# Convierto a formato long porque quiero modelar tasa de Rimland/No Rimland
+df_long <- anu_frec_cow |>
+  dplyr::select(year, n_rimland_1, n_rimland_0, phase, shock_1945) |>
+  pivot_longer(
+    cols = c(n_rimland_1, n_rimland_0),
+    names_to = "zone",
+    values_to = "n_conflicts"
+  ) |>
+  mutate(
+    phase = recode(
+      phase,
+      "unipolaridad_tardia_multipolaridad_emergente" = "unipolaridad_tardia"
+    )
+  ) |>
+  mutate(
+    zone = ifelse(zone == "n_rimland_1", "Rimland", "No_Rimland"),
+    zone = factor(zone),
+    phase = factor(phase),
+    shock_1945 = factor(shock_1945)
+  )
+```
+
+### Modelo nulo (solo intercepto)
+
+```{r}
+m0 <- glm(n_conflicts ~ 1, family = poisson, data = df_long)
+
+broom::tidy(m0, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con zonas geográficas (Rimland vs. No Rimland)
+
+```{r}
+m_zone <- glm(n_conflicts ~ zone, family = poisson, data = df_long)
+
+broom::tidy(m_zone, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con fases del sistema internacional
+
+```{r}
+m_phase <- glm(n_conflicts ~ phase, family = poisson, data = df_long)
+
+broom::tidy(m_phase, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con shock 1945
+
+```{r}
+m_45 <- glm(n_conflicts ~ shock_1945, family = poisson, data = df_long)
+
+broom::tidy(m_45, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo combinado: zona + fases + shock
+
+```{r}
+m_full <- glm(
+  n_conflicts ~ zone + phase + shock_1945,
+  family = poisson,
+  data = df_long
+)
+
+broom::tidy(m_full, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelos con corrección por sobredispersión
+
+```{r}
+# deviance(m_full) / df.residual(m_full)
+
+```
+
+```{r}
+# Quasi‑Poisson
+m_full_qp <- glm(
+  n_conflicts ~ zone + phase + shock_1945,
+  family = quasipoisson,
+  data = df_long
+)
+
+broom::tidy(m_full_qp, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+```{r}
+# Negative Binomial
+m_full_nb <- MASS::glm.nb(
+  n_conflicts ~ zone + phase + shock_1945,
+  data = df_long
+)
+
+broom::tidy(m_full_nb, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Comparación de modelos
+
+```{r}
+AIC(m0, m_zone, m_phase, m_45, m_full, m_full_nb)
+```
+
+## UCDP
+
+```{r}
+#| echo: false
+df_long <- anu_frec_ucdp |>
+  dplyr::select(year, n_rimland_1, n_rimland_0, phase, shock_1945, shock_1991, shock_2001) |>
+  pivot_longer(
+    cols = c(n_rimland_1, n_rimland_0),
+    names_to = "zone",
+    values_to = "n_conflicts"
+  ) |>
+  mutate(
+    phase = recode(
+      phase,
+      "unipolaridad_tardia_multipolaridad_emergente" = "unipolaridad_tardia"
+    )
+  ) |>
+  mutate(
+    zone = ifelse(zone == "n_rimland_1", "Rimland", "No_Rimland"),
+    zone = factor(zone),
+    phase = factor(phase),
+    shock_2001 = factor(shock_2001),
+    shock_1991 = factor(shock_1991),
+    shock_1945 = factor(shock_1945)
+  )
+```
+
+### Modelo nulo (solo intercepto)
+
+```{r}
+m0 <- glm(n_conflicts ~ 1, family = poisson, data = df_long)
+
+broom::tidy(m0, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con zonas geográficas (Rimland vs. No Rimland)
+
+```{r}
+m_zone <- glm(n_conflicts ~ zone, family = poisson, data = df_long)
+
+broom::tidy(m_zone, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con fases del sistema internacional
+
+```{r}
+m_phase <- glm(n_conflicts ~ phase, family = poisson, data = df_long)
+
+broom::tidy(m_phase, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo con shock 1945
+
+```{r}
+m_1945 <- glm(n_conflicts ~ shock_1945, family = poisson, data = df_long)
+
+broom::tidy(m_1945, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# La dirección del efecto es contraintuitiva respecto a H 2.3: en lugar de reducirse, la frecuencia aumenta marcadamente tras 1945. Esto refleja probablemente la expansión del sistema internacional post-WWII y la proliferación de conflictos internos en el período de descolonización, más que un efecto causal del shock en sí. El modelo mejora levemente respecto al nulo (devianza residual 285,48 vs 294,67), pero la mejora es modesta dado el AIC=612,64.
+```
+
+### Modelo con shock 1991
+
+```{r}
+m_1991 <- glm(n_conflicts ~ shock_1991, family = poisson, data = df_long)
+
+broom::tidy(m_1991, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# La dirección del efecto es coherente con lo esperado por H 2.3 — el fin de la Guerra Fría reduciría la frecuencia de conflictos — pero la evidencia no es concluyente. El intercepto (IRR≈2,03 conflictos/año pre-1991) sí es altamente significativo (p<2e-16), lo que contrasta con la inestabilidad observada en el modelo de shock_1945. La ausencia de efecto significativo sugiere que 1991 no representa un quiebre en la frecuencia de conflictos UCDP, a diferencia de su impacto sobre la duración e intensidad.
+```
+
+### Modelo con shock 2001
+
+```{r}
+m_2001 <- glm(n_conflicts ~ shock_2001, family = poisson, data = df_long)
+
+broom::tidy(m_2001, exponentiate = TRUE, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo combinado: zona + fases + shock
+
+```{r}
+m_full <- glm(
+  n_conflicts ~ zone + phase + shock_1945 + shock_1991 + shock_2001,
+  family = poisson,
+  data = df_long
+)
+
+broom::tidy(m_full, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# El modelo full revela una estructura compleja: el fin de la Guerra Fría (shock_1991) se asocia paradójicamente a un aumento de frecuencia en el corto plazo, mientras que la fase de unipolaridad temprana (1992–2001) muestra una reducción significativa. Esto sugiere que el quiebre de 1991 produjo una explosión inicial de conflictos que luego se moderó durante la década siguiente.
+```
+
+### Modelos con corrección por sobredispersión
+
+```{r}
+# deviance(m_full) / df.residual(m_full)
+# Deviance/df = 1.84
+# → sobredispersión moderada
+# → Poisson inflaría significancia
+# → NB es apropiado
+```
+
+```{r}
+# Quasi‑Poisso
+m_full_qp <- glm(
+  n_conflicts ~ zone + phase + shock_1945 + shock_1991 + shock_2001,
+  family = quasipoisson,
+  data = df_long
+)
+
+broom::tidy(m_full_qp, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+```{r}
+# Negative Binomial
+m_full_nb <- MASS::glm.nb(
+  n_conflicts ~ zone + phase + shock_1945 + shock_1991 + shock_2001,
+  data = df_long
+)
+
+broom::tidy(m_full_nb, exponentiate = TRUE, conf.int = TRUE) |>
+  mutate(term = str_replace(term, "unipolaridad_tardia_multipolaridad_emergente", "unipolaridad_tardia")) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+# La Binomial Negativa es la especificación preferida por ajuste (AIC más bajo) y por tratamiento explícito de la sobredispersión. Bajo esta especificación más conservadora, ningún predictor alcanza significancia convencional al 5%, y solo la unipolaridad temprana retiene evidencia marginal (p=0,079). Esto refuerza la conclusión de que la frecuencia de conflictos UCDP es difícil de explicar con las variables estructurales disponibles, y que la variabilidad inherente de los datos domina sobre los efectos de los predictores.
+```
+
+### Comparación de modelos
+
+```{r}
+AIC(m0, m_zone, m_phase, m_2001, m_full, m_full_qp, m_full_nb)
+```
+

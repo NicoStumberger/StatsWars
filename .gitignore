@@ -1,0 +1,29 @@
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Datos
+*.csv
+*.xlsx
+*.rds
+*.dta
+*.sav
+*.xls
+
+# Outputs y temporales
+/figures
+/results
+/output
+/outputs
+*.pdf
+*.docx
+*.png
+*.jpg
+
+# Quarto outputs
+/_site
+/.quarto
+*_files/

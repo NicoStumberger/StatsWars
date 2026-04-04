@@ -1,0 +1,609 @@
+---
+title: "Anexo X: Intensidad de conflictos"
+format:
+  docx:
+    reference-doc: Res CS 2_23 - Carátula de TF UNTREF.docx
+execute:
+  warning: false
+  message: false
+  error: false
+  echo: false
+  engine: r
+---
+
+```{r}
+#| include: false
+
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(survival)
+library(survminer)
+
+
+theme_set(theme_minimal())
+
+# Función para asegurar 300 dpi en todas las figuras
+knitr::opts_chunk$set(
+  fig.dpi = 300,
+  fig.width = 5,
+  fig.height = 3
+)
+
+# Input ------------------------------------------------------------------
+conf_durint_cow <- readRDS("data_gold/conf_durint_cow.rds")
+conf_durint_sdq <- readRDS("data_gold/conf_durint_sdq.rds")
+conf_durint_ucdp <- readRDS("data_gold/conf_durint_ucdp.rds")
+```
+
+# Análisis Exploratorio de Datos
+
+## Distribución general de la intensidad
+
+La intensidad se aproxima mediante:
+
+- SDQ y COW: log_deaths (logaritmo de muertes totales del conflicto).
+- UCDP: intensity_level (Minor ≥25 muertes/año vs War ≥1000 muertes/año).
+
+```{r}
+conf_durint_sdq |>
+  filter(!is.na(log_deaths)) |>
+  filter(log_deaths > 0) |>
+  ggplot(aes(log_deaths)) +
+  geom_histogram(bins = 50) + 
+  theme_minimal() +
+  labs(
+    x = "Número de muertes en base 10 logarítmica",
+    y = "Número de conflictos (SDQ)"
+  )
+
+conf_durint_cow |>
+  filter(!is.na(log_deaths)) |>
+  filter(log_deaths > 0) |>
+  ggplot(aes(log_deaths)) +
+  geom_histogram(bins = 50) +
+  theme_minimal() +
+  labs(
+    x = "Número de muertes en base 10 logarítmica",
+    y = "Número de conflictos (COW)"
+  )
+
+# hist(log(conf_durint_cow$log_deaths)) 
+
+# hist(log(conf_durint_sdq$log_deaths))
+```
+
+La transformación logarítmica es necesaria y adecuada.
+
+Los modelos lineales sobre log_deaths son una aproximación válida y coherente con la literatura.
+
+En UCDP, la intensidad no se modela como una variable continua, sino como una clasificación:
+
+- Minor (25–999 muertes/año)
+- War (≥1000 muertes/año)
+
+## Intensidad por fase del sistema internacional
+
+```{r}
+conf_durint_sdq |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, log_deaths)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    x = "Fases del sistema internacional",
+    y = "Número de muertes por conflicto en base 10 logarítmica (SDQ)"
+  ) +
+    coord_flip()
+
+conf_durint_cow |>
+  filter(!is.na(phase)) |>
+  filter(log_deaths > 0) |>
+  filter(log_deaths < quantile(log_deaths, 0.95, na.rm = TRUE)) |>
+  ggplot(aes(phase, log_deaths)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    x = "Fases del sistema internacional",
+    y = "Número de muertes por conflicto en base 10 logarítmica (COW)"
+  ) +
+    coord_flip()
+
+# Hay pocos muy altos outliers como para identificar diferencias.
+```
+
+```{r}
+conf_durint_ucdp |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(x = phase, fill = intensity_level)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(
+    # title = "Proporción de Minor vs War por fase",
+    y = "Proporción",
+    x = "Fase"
+  )
+```
+
+## Intensidad y geografía (Rimland)
+
+```{r}
+conf_durint_cow |>
+  filter(log_deaths < quantile(log_deaths, 0.99, na.rm = TRUE)) |>
+  ggplot(aes(factor(rimland), log_deaths)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    x = "Rimland",
+    y = "Número de muertes en base 10 logarítmica (COW)"
+  )
+# altos outliers
+```
+
+```{r}
+conf_durint_ucdp |>
+  ggplot(aes(x = rimland, fill = intensity_level)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(
+    # title = "Proporción de Minor vs War por Rimland/No Rimland",
+    y = "Proporción",
+    x = "Rimland"
+  ) 
+```
+
+## Número de eventos e intensidad
+
+```{r}
+ggplot(conf_durint_cow, aes(n_events)) +
+  geom_histogram(bins = 40) +
+  theme_minimal() +
+  labs(
+    x = "Número de eventos por conflictos",
+    y = "Número de conflictos (COW)"
+  )
+
+
+ggplot(conf_durint_ucdp, aes(n_events)) +
+  geom_histogram(bins = 40) +
+  theme_minimal() +
+  labs(
+    x = "Número de eventos por conflictos",
+    y = "Número de conflictos (UCDP)"
+  )
+
+# Ver si n_events correlaciona con intensidad
+conf_durint_cow |>
+  filter(deaths < quantile(deaths, 0.99, na.rm = TRUE)) |>
+  filter(n_events < quantile(n_events, 0.99, na.rm = TRUE)) |>
+  ggplot(aes(n_events, deaths)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm") +
+  theme_minimal() +
+  labs(
+    x = "Número de eventos por conflictos",
+    y = "Muertes por conflicto (COW)"
+  )
+```
+
+## Intensidad y shocks históricos
+
+```{r}
+conf_durint_sdq |>
+  select(log_deaths, shock_1914, shock_1939, shock_1945) |>
+  pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
+  ggplot(aes(factor(valor), log_deaths)) +
+  geom_boxplot() +
+  facet_wrap(~ shock) +
+  labs(x = "Pre (0) / Post (1)", y = "Log muertes - SDQ") +
+  theme_minimal()
+```
+
+```{r}
+conf_durint_cow |>
+  select(log_deaths, shock_1914, shock_1939, shock_1945, shock_1991) |>
+  pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
+  ggplot(aes(factor(valor), log_deaths)) +
+  geom_boxplot() +
+  facet_wrap(~ shock) +
+  labs(x = "Pre (0) / Post (1)", y = "Log muertes - COW") +
+  theme_minimal()
+# No muy claro
+```
+
+```{r}
+conf_durint_ucdp |>
+  select(intensity_level, shock_1945, shock_1991, shock_2001) |>
+  pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
+  ggplot(aes(x = factor(valor), fill = intensity_level)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~ shock) +
+  labs(x = "Pre (0) / Post (1)", y = "Proporción - UCDP") +
+  theme_minimal()
+# Pareciera tener una mayor proporcion de War antes de 2001
+```
+
+# Revisión de supuestos 
+
+```{r}
+# La variable dependiente es log_deaths:
+# - double
+# Ambas deben ser:
+# - positivas
+# - sin ceros problemáticos (si hay ceros, se filtran)
+
+# SDQ
+sdq <- conf_durint_sdq |>
+    mutate(phase = recode(phase,
+    "unipolaridad_tardia_multipolaridad_emergente" = "unip_tard",
+    "unipolaridad_temprana" = "unip_temp",
+    "multipolaridad_clasica" = "multip_cl",
+    "entreguerras" = "entreg",
+    "ruptura_sistema" = "rupt_sist",
+    "bipolaridad" = "bipolar"
+  )) |>
+  mutate(log_deaths = as.numeric(log_deaths)) |>
+  filter(!is.na(log_deaths))
+
+# COW
+cow <- conf_durint_cow |>
+    mutate(phase = recode(phase,
+    "unipolaridad_tardia_multipolaridad_emergente" = "unip_tard",
+    "unipolaridad_temprana" = "unip_temp",
+    "multipolaridad_clasica" = "multip_cl",
+    "entreguerras" = "entreg",
+    "ruptura_sistema" = "rupt_sist",
+    "bipolaridad" = "bipolar"
+  )) |>
+  mutate(log_deaths = as.numeric(log_deaths)) |>
+  filter(!is.na(log_deaths))
+
+# UCDP
+ucdp <- conf_durint_ucdp |>
+    mutate(phase = recode(phase,
+    "unipolaridad_tardia_multipolaridad_emergente" = "unip_tard",
+    "unipolaridad_temprana" = "unip_temp",
+    "multipolaridad_clasica" = "multip_cl",
+    "entreguerras" = "entreg",
+    "ruptura_sistema" = "rupt_sist",
+    "bipolaridad" = "bipolar"
+  )) |>
+  mutate(
+    intensity_level = factor(
+      intensity_level,
+      levels = c("Minor", "War"),
+      ordered = TRUE
+    )
+  )
+```
+
+## Supuestos para modelos lineales (SDQ y COW)
+
+```{r}
+m_lm_sdq <- lm(log_deaths ~ 1, data = sdq)
+m_lm_cow <- lm(log_deaths ~ 1, data = cow)
+```
+
+### Normalidad de los residuos
+
+Los QQ-plots y test de Shapiro-Wilk muestran desviaciones de la normalidad perfecta, esperables en datos con colas pesadas; la transformación logarítmica reduce la asimetría y los modelos lineales son robustos a estas desviaciones con tamaños muestrales grandes
+
+
+```{r}
+qqnorm(residuals(m_lm_sdq))
+qqline(residuals(m_lm_sdq))
+# Parece una regresion logistica, muchos puntos paralelos al eje X.
+# Pero tambien varios (un tercio) siguiendo la diagonal
+shapiro.test(residuals(m_lm_sdq)) # opcional
+# H0: Los residuos son normales.
+# Claramente no normal
+
+qqnorm(residuals(m_lm_cow))
+qqline(residuals(m_lm_cow))
+# es lineal pero ligeramente pandeado (forma de U abierta) sobre la diagonal.
+shapiro.test(residuals(m_lm_cow)) # opcional
+# H0: Los residuos son normales.
+# Claramente no normal
+```
+
+### Homocedasticidad
+
+El test de Breusch-Pagan indica heterocedasticidad estadística en ambos datasets, pero sin patrones severos que comprometan la validez del modelo.
+
+```{r}
+# Ejemplo con phase
+m_lm_phase_sdq <- lm(log_deaths ~ phase, data = sdq)
+m_lm_phase_cow <- lm(log_deaths ~ phase, data = cow)
+
+# Gráfico de residuos vs ajustados
+plot(m_lm_phase_sdq, which = 1)
+plot(m_lm_phase_cow, which = 1)
+
+# Test de Breusch–Pagan
+library(lmtest)
+bptest(m_lm_phase_sdq)
+bptest(m_lm_phase_cow)
+```
+
+### Influencia
+
+Los casos influyentes corresponden a conflictos extremadamente letales reales; la estabilidad de los coeficientes se verifica con y sin su inclusión.
+
+```{r}
+# SDQ
+cooks_sdq <- cooks.distance(m_lm_phase_sdq)
+plot(cooks_sdq, main = "Cook's distance SDQ")
+abline(h = 4 / length(cooks_sdq), col = "red", lty = 2)
+which(cooks_sdq > 4 / length(cooks_sdq))
+
+# COW
+cooks_cow <- cooks.distance(m_lm_phase_cow)
+plot(cooks_cow, main = "Cook's distance COW")
+abline(h = 4 / length(cooks_cow), col = "red", lty = 2)
+which(cooks_cow > 4 / length(cooks_cow))
+```
+
+### Multicolinealidad
+
+Los VIF no superan 10 en ningún modelo; la correlación entre fase y shock_1945 en COW es esperable por razones históricas pero manejable.
+
+```{r}
+library(car)
+# Ejemplo SDQ full (sin rimland)
+m_lm_full_sdq <- lm(log_deaths ~ phase + shock_1945, data = sdq)
+vif(m_lm_full_sdq)
+
+# Ejemplo COW full
+m_lm_full_cow <- lm(log_deaths ~ phase + rimland + shock_1945, data = cow)
+vif(m_lm_full_cow)
+```
+
+## Supuestos para regresión logística (UCDP)
+
+```{r}
+m_ucdp_logit <- glm(
+  intensity_level ~ phase + shock_1945 + shock_1991 + rimland,
+  data = ucdp,
+  family = binomial
+)
+```
+
+### Linealidad del logit
+
+No aplica: todos los predictores son categóricos.
+
+### Independencia de observaciones
+
+Cada fila representa un conflicto distinto; el supuesto se cumple.
+
+### Multicolinealidad
+
+Los VIF son extremadamente altos en el modelo full por la escasez de observaciones pre-1945 y post-1991; por esta razón no se estima un modelo full para UCDP.
+
+```{r}
+vif(m_ucdp_logit)
+```
+
+### Influencia
+
+Los casos influyentes corresponden a conflictos reales de alta intensidad y no alteran los coeficientes ni la significancia.
+
+```{r}
+plot(cooks.distance(m_ucdp_logit))
+```
+
+# Modelos estadísticos
+
+## SDQ
+
+### Modelo base
+
+```{r}
+m_base_sdq <- lm(log_deaths ~ 1, data = sdq)
+broom::tidy(m_base_sdq, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+# Como modelo, sin predictores.
+```
+
+### Modelo por fase
+
+```{r}
+m_phase_sdq <- lm(log_deaths ~ phase, data = sdq)
+broom::tidy(m_phase_sdq, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo shock 1945
+
+```{r}
+m_1945_sdq <- lm(log_deaths ~ shock_1945, data = sdq)
+broom::tidy(m_1945_sdq, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo full (fase + shock 1945)
+
+```{r}
+m_full_sdq <- lm(log_deaths ~ phase + shock_1945, data = sdq)
+broom::tidy(m_full_sdq, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Comparación de modelos (AIC)
+
+```{r}
+AIC(m_base_sdq, m_phase_sdq, m_1945_sdq, m_full_sdq)
+```
+
+## COW
+
+### Modelo base
+
+```{r}
+m_base_cow <- lm(log_deaths ~ 1, data = cow)
+broom::tidy(m_base_cow, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+```
+
+### Modelo por fase
+
+```{r}
+m_phase_cow <- lm(log_deaths ~ phase, data = cow)
+broom::tidy(m_phase_cow, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+#  Multipolaridad clásica (≈ 1815–1914) Conflictos ~32% menos intensos que en bipolaridad.
+# Ruptura del sistema (1914–1945) Conflictos ~3 veces más intensos.
+#  Unipolaridad tardía tendencia a menor intensidad, pero no significativa
+# ✔ R² = 0.044
+# Muy bajo, pero esperable
+```
+
+### Modelo shock 1945
+
+```{r}
+m_1945_cow <- lm(log_deaths ~ shock_1945, data = cow)
+broom::tidy(m_1945_cow, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+# No significativo (p = 0.11)
+# Efecto pequeño y sin dirección clara
+```
+
+### Modelo Rimland
+
+```{r}
+m_rimland_cow <- lm(log_deaths ~ rimland, data = cow)
+broom::tidy(m_rimland_cow, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+# Los conflictos en zonas rimland son ~40% más intensos
+# ✔ R² = 0.009
+# → efecto estadístico, pero no estructural.
+
+
+```
+
+### Modelo full (fase + rimland + shock 1945)
+
+```{r}
+m_full_cow <- lm(log_deaths ~ phase + rimland + shock_1945, data = cow)
+broom::tidy(m_full_cow, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# Ruptura del sistema sigue siendo el predictor dominante
+# Los conflictos de 1914–1945 son ~14 veces más intensos
+#  Rimland sigue siendo significativo ~34% más intensos
+# Shock 1945 se vuelve significativo.
+# Los conflictos posteriores a 1945 son 6 veces más intensos. Contraintuitivo.
+
+# ✔ R² = 0.058
+# Sigue siendo bajo, pero mejora respecto a modelos simples
+
+```
+
+### Comparación de modelos (AIC)
+
+```{r}
+AIC(m_base_cow, m_phase_cow, m_rimland_cow, m_1945_cow, m_full_cow)
+```
+
+## UCDP
+
+### Modelo base
+
+```{r}
+m_base_ucdp <- glm(intensity_level ~ 1, data = ucdp, family = binomial)
+broom::tidy(m_base_ucdp, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# Interpretación:
+# - Esto es el log‑odds de que un conflicto sea War.
+# - Convertido a probabilidad
+
+# En UCDP, solo ~19% de los conflictos son War (≥1000 muertes)
+```
+
+### Modelo por fase
+
+```{r}
+m_phase_ucdp <- glm(intensity_level ~ phase, data = ucdp, family = binomial)
+
+broom::tidy(m_phase_ucdp, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# - Ninguna fase es significativa al 5%
+# - La única con una tendencia marginal es unipolaridad tardía / multipolaridad emergente (p ≈ 0.058), indicando menor probabilidad de War
+# La deviance apenas baja de 292.99 → 288.17.
+```
+
+### Modelo Rimland
+
+```{r}
+m_rimland_ucdp <- glm(intensity_level ~ rimland, data = ucdp, family = binomial)
+
+broom::tidy(m_rimland_ucdp, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# Interpretación:
+# - No significativo.
+# - Rimland no predice si un conflicto es Minor o War
+```
+
+### Modelo shock 1945
+
+```{r}
+m_1945_ucdp <- glm(intensity_level ~ shock_1945, data = ucdp, family = binomial)
+
+broom::tidy(m_1945_ucdp, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+
+# nterpretación:
+# - No significativo.
+# - No hay evidencia de un quiebre en intensidad en 1945
+```
+
+### Modelo shock 1991
+
+```{r}
+m_1991_ucdp <- glm(intensity_level ~ shock_1991, data = ucdp, family = binomial)
+
+broom::tidy(m_1991_ucdp, conf.int = TRUE) |>
+  select(term, estimate, p.value, conf.low, conf.high) |>
+  mutate(OR = exp(estimate)) |>
+  select(term, estimate, OR, p.value, conf.low, conf.high) |>
+  knitr::kable(digits = 3)
+# - único predictor significativo en UCDP
+# Convertido a odds ratio:
+# Después de 1991, la probabilidad de que un conflicto sea War cae ~58%
+# ✔ AIC = 290.03
+# Es el mejor modelo de todos.
+```
+
+### Comparación de modelos (AIC)
+
+```{r}
+AIC(m_base_ucdp, m_phase_ucdp, m_rimland_ucdp, m_1945_ucdp, m_1991_ucdp)
+# Shock 1991 es el único predictor que mejora sustancialmente el modelo.
+```
