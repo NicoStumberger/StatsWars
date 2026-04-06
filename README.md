@@ -1,6 +1,6 @@
 # StatsWars
 
-## Análisis probabilístico de conflictos armados post-1945
+## Análisis probabilístico de conflictos armados
 
 Scripts R y documentos Quarto utilizados en la tesis de maestría:
 
