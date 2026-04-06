@@ -4,7 +4,7 @@
 
 Scripts R y documentos Quarto utilizados en la tesis de maestría:
 
-> *Análisis probabilístico de conflictos armados post-1945: frecuencia, 
+> *Análisis probabilístico de conflictos armados: frecuencia, 
 > intervalo, duración e intensidad mediante modelos de conteo y supervivencia*
 
 Tesis presentada para obtener el título de Magíster en Generación y 
