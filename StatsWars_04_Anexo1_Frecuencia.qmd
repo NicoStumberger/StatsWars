@@ -31,7 +31,7 @@ theme_set(theme_minimal())
 knitr::opts_chunk$set(
   fig.dpi = 300,
   fig.width = 5,
-  fig.height = 3
+  fig.height = 2.5
 )
 
 # Input ------------------------------------------------------------------
@@ -48,259 +48,74 @@ time_between_sdq <- readRDS("data_gold/time_between_sdq.rds")
 time_between_ucdp <- readRDS("data_gold/time_between_ucdp.rds")
 ```
 
-# Análisis Exploratorio de Datos
+# Estadísticas descriptivas
 
-## Serie temporal
+El análisis exploratorio de datos completo — series temporales, distribuciones por fase, shocks y Rimland — está disponible en el repositorio público de esta investigación (Stumberger, 2026).
 
-### SDQ
+## Frecuencia media por fase
 
 ```{r}
-#| echo: false
-
-ggplot(anu_frec_sdq, aes(year, n_conflictos_sdq)) +
-  geom_line() +
-  geom_point() +
-  labs(
-  x = "Año",
-  y = "Número de conflictos (SDQ)"
-) +
-  theme_minimal()
+bind_rows(
+  anu_frec_sdq |>
+    group_by(phase) |>
+    summarise(media = round(mean(n_conflictos_sdq, na.rm = TRUE), 2)) |>
+    mutate(dataset = "SDQ"),
+  anu_frec_cow |>
+    group_by(phase) |>
+    summarise(media = round(mean(n_conflictos_cow, na.rm = TRUE), 2)) |>
+    mutate(dataset = "COW"),
+  anu_frec_ucdp |>
+    group_by(phase) |>
+    summarise(media = round(mean(n_conflictos_ucdp, na.rm = TRUE), 2)) |>
+    mutate(dataset = "UCDP")
+) |>
+  pivot_wider(names_from = dataset, values_from = media) |>
+  knitr::kable(digits = 2)
 ```
 
-### COW
+## Frecuencia media antes y después de shocks
 
 ```{r}
-#| echo: false
-
-ggplot(anu_frec_cow, aes(year, n_conflictos_cow)) +
-  geom_line() +
-  geom_point() +
-  labs(
-  x = "Año",
-  y = "Número de conflictos (COW)"
-) +
-  theme_minimal()
+bind_rows(
+  anu_frec_sdq |>
+    pivot_longer(cols = c(shock_1939, shock_1945), names_to = "shock", values_to = "valor") |>
+    group_by(shock, valor) |>
+    summarise(media = round(mean(n_conflictos_sdq, na.rm = TRUE), 2)) |>
+    mutate(dataset = "SDQ"),
+  anu_frec_cow |>
+    pivot_longer(cols = c(shock_1945, shock_1991), names_to = "shock", values_to = "valor") |>
+    group_by(shock, valor) |>
+    summarise(media = round(mean(n_conflictos_cow, na.rm = TRUE), 2)) |>
+    mutate(dataset = "COW"),
+  anu_frec_ucdp |>
+    pivot_longer(cols = c(shock_1945, shock_1991), names_to = "shock", values_to = "valor") |>
+    group_by(shock, valor) |>
+    summarise(media = round(mean(n_conflictos_ucdp, na.rm = TRUE), 2)) |>
+    mutate(dataset = "UCDP")
+) |>
+  mutate(valor = ifelse(valor == 0, "Pre", "Post")) |>
+  pivot_wider(names_from = c(dataset), values_from = media) |>
+  knitr::kable(digits = 2)
 ```
 
-### UCDP
+## Frecuencia media por zona geográfica (Rimland)
 
 ```{r}
-#| echo: false
-
-ggplot(anu_frec_ucdp, aes(year, n_conflictos_ucdp)) +
-  geom_line() +
-  geom_point() +
-  labs(
-  x = "Año",
-  y = "Número de conflictos (UCDP)"
-) +
-  theme_minimal()
-```
-
-### Comparación entre SDQ, COW y UCDP
-
-```{r}
-#| echo: false
-anu_frec_all <- anu_frec_cow |>
-  select(year, n_conflictos_cow) |>
-  full_join(anu_frec_ucdp |> select(year, n_conflictos_ucdp), by = "year") |>
-  full_join(anu_frec_sdq |> select(year, n_conflictos_sdq), by = "year")
-
-anu_frec_all_long <- anu_frec_all |>
-  pivot_longer(
-    cols = starts_with("n_conflictos"),
-    names_to = "dataset",
-    values_to = "n_conflictos"
-  )
-
-anu_frec_all_long$dataset <- recode(
-  anu_frec_all_long$dataset,
-  "n_conflictos_cow" = "COW",
-  "n_conflictos_ucdp" = "UCDP",
-  "n_conflictos_sdq" = "SDQ"
-)
-
-
-ggplot(anu_frec_all_long, aes(x = year, y = n_conflictos, color = dataset)) +
-  geom_line() +
-  geom_point(size = 1.5) +
-  theme_minimal() +
-  labs(
-    # title = "Frecuencia anual de conflictos por dataset",
-    x = "Año",
-    y = "Número de conflictos",
-    color = "Dataset"
-  )
-```
-
-## Frecuencia por fase del sistema internacional
-
-### SDQ
-
-```{r}
-#| echo: false
-
-anu_frec_sdq |>
-  # filter(!is.na(phase)) |>
-  group_by(phase) |>
-  summarise(
-    mean_conflicts = mean(n_conflictos_sdq, na.rm = TRUE),
-    n = n()
-  )
-
-anu_frec_sdq |>
-  filter(!is.na(phase)) |>
-  ggplot(aes(phase, n_conflictos_sdq)) +
-  geom_boxplot() +
-  labs(
-    x = "Fase",
-    y = "Número de conflictos (SDQ)"
-  ) +
-  theme_minimal() +
-  coord_flip()
-```
-
-### COW
-
-```{r}
-#| echo: false
-anu_frec_cow %>%
-  group_by(phase) %>%
-  summarise(
-    mean_conflicts = mean(n_conflictos_cow, na.rm = TRUE),
-    n = n()
-  )
-
-anu_frec_cow |>
-  filter(!is.na(phase)) |>
-  ggplot(aes(phase, n_conflictos_cow)) +
-  geom_boxplot() +
-  labs(
-    x = "Fase",
-    y = "Número de conflictos (COW)"
-  ) +
-  theme_minimal() +
-  coord_flip()
-```
-
-### UCDP
-
-```{r}
-#| echo: false
-anu_frec_ucdp |>
-  group_by(phase) |>
-  summarise(
-    mean_conflicts = mean(n_conflictos_ucdp, na.rm = TRUE),
-    n = n()
-  )
-
-anu_frec_ucdp |>
-  filter(!is.na(phase)) |>
-  ggplot(aes(phase, n_conflictos_ucdp)) +
-  geom_boxplot() +
-  labs(
-    x = "Fase",
-    y = "Número de conflictos (UCDP)"
-  ) +
-  theme_minimal() +
-  coord_flip()
-```
-
-## Frecuencia antes/después de shocks
-
-### SDQ
-
-```{r}
-#| echo: false
-anu_frec_sdq |>
-  select(year, n_conflictos_sdq, shock_1815, shock_1914, shock_1939, shock_1945) |>
-  pivot_longer(
-    cols = starts_with("shock_"),
-    names_to = "shock",
-    values_to = "valor"
-  ) |>
-  ggplot(aes(factor(valor), n_conflictos_sdq)) +
-  geom_boxplot() +
-  facet_wrap(~ shock, scales = "free") +
-  labs(
-    x = "Pre (0) / Post (1)",
-    y = "Número de conflictos (SDQ)"
-  ) +
-  theme_minimal()
-```
-
-### COW
-
-```{r}
-#| echo: false
-anu_frec_cow |>
-  select(n_conflictos_cow, shock_1914, shock_1939, shock_1945, shock_1991, shock_2001) |>
-  pivot_longer(
-    cols = starts_with("shock_"),
-    names_to = "shock",
-    values_to = "valor"
-  ) |>
-  ggplot(aes(factor(valor), n_conflictos_cow)) +
-  geom_boxplot() +
-  facet_wrap(~ shock, scales = "free") +
-  labs(
-    x = "Pre (0) / Post (1)",
-    y = "Número de conflictos (COW)"
-  ) +
-  theme_minimal()
-
-```
-
-### UCDP
-
-```{r}
-#| echo: false
-anu_frec_ucdp |>
-  select(n_conflictos_ucdp, shock_1945, shock_1991, shock_2001) |>
-  pivot_longer(
-    cols = starts_with("shock_"),
-    names_to = "shock",
-    values_to = "valor"
-  ) |>
-  ggplot(aes(factor(valor), n_conflictos_ucdp)) +
-  geom_boxplot() +
-  facet_wrap(~ shock, scales = "free") +
-  labs(
-    x = "Pre (0) / Post (1)",
-    y = "Número de conflictos (UCDP)"
-  ) +
-  theme_minimal()
-```
-
-## Rimland vs no rimland (solo COW/UCDP)
-
-### COW
-
-```{r}
-#| echo: false
-ggplot(anu_frec_cow, aes(year)) +
-  geom_line(aes(y = n_rimland_1, color = "Rimland")) +
-  geom_line(aes(y = n_rimland_0, color = "No Rimland")) +
-  labs(
-    x = "Año",
-    y = "Número de conflictos (COW)"
-  ) +
-  theme_minimal()
-```
-
-### UCDP
-
-```{r}
-#| echo: false
-
-ggplot(anu_frec_ucdp, aes(year)) +
-  geom_line(aes(y = n_rimland_1, color = "Rimland")) +
-  geom_line(aes(y = n_rimland_0, color = "No Rimland")) +
-  labs(
-    x = "Año",
-    y = "Número de conflictos (UCDP)"
-  ) +
-  theme_minimal()
+bind_rows(
+  anu_frec_cow |>
+    summarise(
+      Rimland = round(mean(n_rimland_1, na.rm = TRUE), 2),
+      No_Rimland = round(mean(n_rimland_0, na.rm = TRUE), 2)
+    ) |>
+    mutate(dataset = "COW"),
+  anu_frec_ucdp |>
+    summarise(
+      Rimland = round(mean(n_rimland_1, na.rm = TRUE), 2),
+      No_Rimland = round(mean(n_rimland_0, na.rm = TRUE), 2)
+    ) |>
+    mutate(dataset = "UCDP")
+) |>
+  knitr::kable(digits = 2)
 ```
 
 # Revisión de supuestos para Poisson
@@ -345,13 +160,23 @@ La autocorrelación de las series anuales se evaluó mediante ACF; la mayoría d
 
 ```{r}
 #| echo: false
+#| fig.width: 6
+#| fig.height: 6.5
 
-acf(anu_frec_sdq$n_conflictos_sdq)
+par(mfrow = c(3, 1), mar = c(1, 4, 3, 1), oma = c(3, 0, 1, 0))
 
-acf(anu_frec_cow$n_conflictos_cow)
+acf(anu_frec_sdq$n_conflictos_sdq,
+    main = "SDQ (1807–1949)", xlab = "", xaxt = "n")
 
-acf(anu_frec_ucdp$n_conflictos_ucdp)
+acf(anu_frec_cow$n_conflictos_cow,
+    main = "COW (1816–2014)", xlab = "", xaxt = "n")
 
+acf(anu_frec_ucdp$n_conflictos_ucdp,
+    main = "UCDP (1939–2024)", xlab = "")
+
+mtext("Lag", side = 1, outer = TRUE, line = 1.5)
+
+par(mfrow = c(1, 1))
 ```
 
 ## Linealidad en el link log
@@ -361,6 +186,10 @@ La decisión de modelar la geografía únicamente como Rimland/No Rimland reduce
 # Modelos estadísticos
 
 ## SDQ
+
+*Variable dependiente: número de conflictos diádicos anuales. 
+Predictores: fase del sistema internacional, shock de 1939 y shock 
+de 1945. Datos: `anu_frec_sdq`.*
 
 ```{r}
 #| echo: false
@@ -494,6 +323,11 @@ AIC(m0, m_phase, m_39, m_45, m_full, m_full_nb)
 
 ## COW
 
+*Variable dependiente: número de conflictos anuales por zona geográfica 
+(Rimland / No Rimland), modelados en formato long. Predictores: zona 
+geográfica, fase del sistema internacional y shock de 1945. 
+Datos: `anu_frec_cow`.*
+
 ```{r}
 #| echo: false
 
@@ -617,6 +451,11 @@ AIC(m0, m_zone, m_phase, m_45, m_full, m_full_nb)
 
 ## UCDP
 
+*Variable dependiente: número de conflictos anuales por zona geográfica 
+(Rimland / No Rimland), modelados en formato long. Predictores: zona 
+geográfica, fase del sistema internacional, shock de 1945, shock de 
+1991 y shock de 2001. Datos: `anu_frec_ucdp`.*
+
 ```{r}
 #| echo: false
 df_long <- anu_frec_ucdp |>
@@ -685,6 +524,8 @@ broom::tidy(m_1945, exponentiate = TRUE, conf.int = TRUE) |>
 # La dirección del efecto es contraintuitiva respecto a H 2.3: en lugar de reducirse, la frecuencia aumenta marcadamente tras 1945. Esto refleja probablemente la expansión del sistema internacional post-WWII y la proliferación de conflictos internos en el período de descolonización, más que un efecto causal del shock en sí. El modelo mejora levemente respecto al nulo (devianza residual 285,48 vs 294,67), pero la mejora es modesta dado el AIC=612,64.
 ```
 
+La dirección del efecto es contraintuitiva respecto a H 2.3: en lugar de reducirse, la frecuencia aumenta marcadamente tras 1945. Esto refleja probablemente la expansión del sistema internacional post-WWII y la proliferación de conflictos internos en el período de descolonización, más que un efecto causal del shock en sí. El modelo mejora levemente respecto al nulo (devianza residual 285,48 vs 294,67), pero la mejora es modesta dado el AIC=612,64.
+
 ### Modelo con shock 1991
 
 ```{r}
@@ -724,6 +565,8 @@ broom::tidy(m_full, exponentiate = TRUE, conf.int = TRUE) |>
 # El modelo full revela una estructura compleja: el fin de la Guerra Fría (shock_1991) se asocia paradójicamente a un aumento de frecuencia en el corto plazo, mientras que la fase de unipolaridad temprana (1992–2001) muestra una reducción significativa. Esto sugiere que el quiebre de 1991 produjo una explosión inicial de conflictos que luego se moderó durante la década siguiente.
 ```
 
+El modelo full revela una estructura compleja: el fin de la Guerra Fría (shock_1991) se asocia paradójicamente a un aumento de frecuencia en el corto plazo, mientras que la fase de unipolaridad temprana (1992–2001) muestra una reducción significativa. Esto sugiere que el quiebre de 1991 produjo una explosión inicial de conflictos que luego se moderó durante la década siguiente.
+
 ### Modelos con corrección por sobredispersión
 
 ```{r}
@@ -733,6 +576,8 @@ broom::tidy(m_full, exponentiate = TRUE, conf.int = TRUE) |>
 # → Poisson inflaría significancia
 # → NB es apropiado
 ```
+
+El cociente devianza/grados de libertad es 1,84, indicando sobredispersión moderada. El modelo Poisson clásico subestimaría los errores estándar; se estiman quasi-Poisson y Binomial Negativa como especificaciones alternativas.
 
 ```{r}
 # Quasi‑Poisso
@@ -762,9 +607,12 @@ broom::tidy(m_full_nb, exponentiate = TRUE, conf.int = TRUE) |>
 # La Binomial Negativa es la especificación preferida por ajuste (AIC más bajo) y por tratamiento explícito de la sobredispersión. Bajo esta especificación más conservadora, ningún predictor alcanza significancia convencional al 5%, y solo la unipolaridad temprana retiene evidencia marginal (p=0,079). Esto refuerza la conclusión de que la frecuencia de conflictos UCDP es difícil de explicar con las variables estructurales disponibles, y que la variabilidad inherente de los datos domina sobre los efectos de los predictores.
 ```
 
+La Binomial Negativa es la especificación preferida por ajuste (AIC más bajo) y por tratamiento explícito de la sobredispersión. Bajo esta especificación más conservadora, ningún predictor alcanza significancia convencional al 5%, y solo la unipolaridad temprana retiene evidencia marginal (p=0,079). Esto refuerza la conclusión de que la frecuencia de conflictos UCDP es difícil de explicar con las variables estructurales disponibles, y que la variabilidad inherente de los datos domina sobre los efectos de los predictores.
+
 ### Comparación de modelos
 
 ```{r}
-AIC(m0, m_zone, m_phase, m_2001, m_full, m_full_qp, m_full_nb)
+# quasi-Poisson excluido: no tiene AIC definido
+AIC(m0, m_zone, m_phase, m_2001, m_full, m_full_nb)
 ```
 

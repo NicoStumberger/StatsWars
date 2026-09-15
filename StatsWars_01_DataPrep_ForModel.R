@@ -3,9 +3,9 @@ library(readr)
 library(lubridate)
 
 # Input ------------------------------------------------------------------
-full_sdq <- readRDS(file = "data_silver/full_sdq.rds")
-full_cow <- readRDS(file = "data_silver/full_cow.rds")
-full_ucdp_prio <- readRDS(file = "data_silver/full_ucdp_prio.rds")
+full_sdq <- readRDS(file = "Data/data_silver/full_sdq.rds")
+full_cow <- readRDS(file = "Data/data_silver/full_cow.rds")
+full_ucdp_prio <- readRDS(file = "Data/data_silver/full_ucdp_prio.rds")
 
 # Data prep --------------------------------------------------------------
 
@@ -109,7 +109,7 @@ anu_frec_ucdp <- full_ucdp_prio |>
   ungroup() |>
   # completar años faltantes
   complete(
-    year = full_seq(1949:2024, 1),
+    year = full_seq(1939:2024, 1),
     fill = list(
       n_conflictos_ucdp = 0
     )
@@ -191,9 +191,10 @@ conf_durint_sdq <- full_sdq |>
     id,
     year,
     months,
-    deaths,
-    log_deaths
+    deaths
   ) |>
+  # Igual que COW — consistencia total (porque log_deaths orginal era log en base 10):
+  mutate(log_deaths = log(deaths + 1)) |>
   # Crear variable PHASE
   mutate(
     phase = case_when(
@@ -229,6 +230,7 @@ conf_durint_cow <- full_cow |>
     rimland,
     geo_zone
   ) |>
+  mutate(year = as.numeric(as.character(year))) |> # ← fix
   # Crear variable PHASE
   mutate(
     phase = case_when(
@@ -443,26 +445,43 @@ time_between_ucdp <- full_ucdp_prio |>
   )
 
 # Guardar datasets limpios ------------------------------------------------
-saveRDS(anu_frec_sdq, file = "data_gold/anu_frec_sdq.rds")
-saveRDS(anu_frec_cow, file = "data_gold/anu_frec_cow.rds")
-saveRDS(anu_frec_ucdp, file = "data_gold/anu_frec_ucdp.rds")
-saveRDS(anu_frec_ucdp_War, file = "data_gold/anu_frec_ucdp_War.rds")
-saveRDS(conf_durint_sdq, file = "data_gold/conf_durint_sdq.rds")
-saveRDS(conf_durint_cow, file = "data_gold/conf_durint_cow.rds")
-saveRDS(conf_durint_ucdp, file = "data_gold/conf_durint_ucdp.rds")
-saveRDS(time_between_sdq, file = "data_gold/time_between_sdq.rds")
-saveRDS(time_between_cow, file = "data_gold/time_between_cow.rds")
-saveRDS(time_between_ucdp, file = "data_gold/time_between_ucdp.rds")
+saveRDS(anu_frec_sdq, file = "Data/data_gold/anu_frec_sdq.rds")
+saveRDS(anu_frec_cow, file = "Data/data_gold/anu_frec_cow.rds")
+saveRDS(anu_frec_ucdp, file = "Data/data_gold/anu_frec_ucdp.rds")
+saveRDS(anu_frec_ucdp_War, file = "Data/data_gold/anu_frec_ucdp_War.rds")
+saveRDS(conf_durint_sdq, file = "Data/data_gold/conf_durint_sdq.rds")
+saveRDS(conf_durint_cow, file = "Data/data_gold/conf_durint_cow.rds")
+saveRDS(conf_durint_ucdp, file = "Data/data_gold/conf_durint_ucdp.rds")
+saveRDS(time_between_sdq, file = "Data/data_gold/time_between_sdq.rds")
+saveRDS(time_between_cow, file = "Data/data_gold/time_between_cow.rds")
+saveRDS(time_between_ucdp, file = "Data/data_gold/time_between_ucdp.rds")
 
 
 # Save CSV
-write_csv(anu_frec_sdq, file = "data_gold/anu_frec_sdq.csv")
-write_csv(anu_frec_cow, file = "data_gold/anu_frec_cow.csv")
-write_csv(anu_frec_ucdp, file = "data_gold/anu_frec_ucdp.csv")
-write_csv(anu_frec_ucdp_War, file = "data_gold/anu_frec_ucdp_War.csv")
-write_csv(conf_durint_sdq, file = "data_gold/conf_durint_sdq.csv")
-write_csv(conf_durint_cow, file = "data_gold/conf_durint_cow.csv")
-write_csv(conf_durint_ucdp, file = "data_gold/conf_durint_ucdp.csv")
-write_csv(time_between_sdq, file = "data_gold/time_between_sdq.csv")
-write_csv(time_between_cow, file = "data_gold/time_between_cow.csv")
-write_csv(time_between_ucdp, file = "data_gold/time_between_ucdp.csv")
+write_csv(anu_frec_sdq, file = "Data/data_gold/anu_frec_sdq.csv")
+write_csv(anu_frec_cow, file = "Data/data_gold/anu_frec_cow.csv")
+write_csv(anu_frec_ucdp, file = "Data/data_gold/anu_frec_ucdp.csv")
+write_csv(anu_frec_ucdp_War, file = "Data/data_gold/anu_frec_ucdp_War.csv")
+write_csv(conf_durint_sdq, file = "Data/data_gold/conf_durint_sdq.csv")
+write_csv(conf_durint_cow, file = "Data/data_gold/conf_durint_cow.csv")
+write_csv(conf_durint_ucdp, file = "Data/data_gold/conf_durint_ucdp.csv")
+write_csv(time_between_sdq, file = "Data/data_gold/time_between_sdq.csv")
+write_csv(time_between_cow, file = "Data/data_gold/time_between_cow.csv")
+write_csv(time_between_ucdp, file = "Data/data_gold/time_between_ucdp.csv")
+
+
+# El intercepto del modelo base debería cambiar
+# Antes (log10): 4.42  → exp(4.42) ≈ 83  (incorrecto)
+# Después (ln):  4.42 * log(10) ≈ 10.17 → exp(10.17) ≈ 26.300 (correcto)
+
+# Verificación rápida:
+cat(
+  "Media log_deaths (debe ser ≈ 10.17):",
+  mean(conf_durint_sdq$log_deaths),
+  "\n"
+)
+cat(
+  "Back-transform (debe ser ≈ 26.300):",
+  exp(mean(conf_durint_sdq$log_deaths)),
+  "\n"
+)

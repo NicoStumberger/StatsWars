@@ -4,14 +4,14 @@ library(lubridate)
 library(survival)
 
 # Input ------------------------------------------------------------------
-anu_frec_cow <- readRDS("data_gold/anu_frec_cow.rds")
-anu_frec_sdq <- readRDS("data_gold/anu_frec_sdq.rds")
-anu_frec_ucdp <- readRDS("data_gold/anu_frec_ucdp.rds")
-anu_frec_ucdp_War <- readRDS("data_gold/anu_frec_ucdp_War.rds")
+anu_frec_cow <- readRDS("Data/data_gold/anu_frec_cow.rds")
+anu_frec_sdq <- readRDS("Data/data_gold/anu_frec_sdq.rds")
+anu_frec_ucdp <- readRDS("Data/data_gold/anu_frec_ucdp.rds")
+anu_frec_ucdp_War <- readRDS("Data/data_gold/anu_frec_ucdp_War.rds")
 
-conf_durint_cow <- readRDS("data_gold/conf_durint_cow.rds")
-conf_durint_sdq <- readRDS("data_gold/conf_durint_sdq.rds")
-conf_durint_ucdp <- readRDS("data_gold/conf_durint_ucdp.rds")
+conf_durint_cow <- readRDS("Data/data_gold/conf_durint_cow.rds")
+conf_durint_sdq <- readRDS("Data/data_gold/conf_durint_sdq.rds")
+conf_durint_ucdp <- readRDS("Data/data_gold/conf_durint_ucdp.rds")
 
 # Preparacion de datasets ------------------------------------------------
 # La variable dependiente es log_deaths:
@@ -242,6 +242,17 @@ summary(m_full_sdq)
 ## Comparacion modelos ----------------------------------------------------
 
 AIC(m_base_sdq, m_phase_sdq, m_1945_sdq, m_full_sdq)
+
+# Números clave para el texto
+cat("\n--- NÚMEROS CLAVE ---\n")
+cat("Intercepto base → muertes medias:", exp(coef(m_base_sdq)[1]), "\n")
+cat(
+  "Ruptura sistema (phase):",
+  exp(coef(m_phase_sdq)["phaseruptura_sistema"]),
+  "\n"
+)
+cat("Shock 1945 (simple):", exp(coef(m_1945_sdq)["shock_1945"]), "\n")
+
 
 # COW --------------------------------------------------------------------
 

@@ -1,0 +1,1043 @@
+---
+title: "Anexo X: Intervalo de conflictos"
+format:
+  docx:
+    reference-doc: Res CS 2_23 - Carátula de TF UNTREF.docx
+execute:
+  warning: false
+  message: false
+  error: false
+  echo: false
+  engine: r
+---
+
+```{r}
+#| include: false
+
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(survival)
+library(survminer)
+library(broom)
+library(knitr)
+library(gt)
+library(patchwork)
+
+theme_set(theme_minimal())
+
+# Función para asegurar 300 dpi en todas las figuras
+knitr::opts_chunk$set(
+  fig.dpi = 800,
+  fig.width = 7, 
+  fig.height = 3
+)
+
+# Input ------------------------------------------------------------------
+anu_frec_cow <- readRDS("data_gold/anu_frec_cow.rds")
+anu_frec_sdq <- readRDS("data_gold/anu_frec_sdq.rds")
+anu_frec_ucdp <- readRDS("data_gold/anu_frec_ucdp.rds")
+
+conf_durint_cow <- readRDS("data_gold/conf_durint_cow.rds")
+conf_durint_sdq <- readRDS("data_gold/conf_durint_sdq.rds")
+conf_durint_ucdp <- readRDS("data_gold/conf_durint_ucdp.rds")
+
+time_between_cow <- readRDS("data_gold/time_between_cow.rds")
+time_between_sdq <- readRDS("data_gold/time_between_sdq.rds")
+time_between_ucdp <- readRDS("data_gold/time_between_ucdp.rds")
+
+# Tabla de coeficientes para modelos de supervivencia --------------------
+# survreg (AFT): TR = exp(beta) es el time ratio.
+#   Exponencial: HR = exp(-beta)          (sigma = 1)
+#   Weibull:     HR = exp(-beta / sigma)  (sigma = parámetro scale)
+#   La fila Log(scale) no tiene HR; su TR = sigma.
+# coxph (PH): el coeficiente ya es log(HR); HR = exp(beta). No existe TR.
+# (Misma función que en el Anexo 3.)
+tabla_surv <- function(modelo) {
+  td <- broom::tidy(modelo, conf.int = TRUE)
+  if (inherits(modelo, "coxph")) {
+    td |>
+      transmute(
+        term, estimate,
+        HR = exp(estimate),
+        p.value,
+        conf.low.HR  = exp(conf.low),
+        conf.high.HR = exp(conf.high)
+      ) |>
+      knitr::kable(digits = 3)
+  } else {
+    sigma <- modelo$scale
+    td |>
+      transmute(
+        term, estimate,
+        TR = exp(estimate),
+        HR = if_else(term == "Log(scale)", NA_real_, exp(-estimate / sigma)),
+        p.value,
+        conf.low.TR  = exp(conf.low),
+        conf.high.TR = exp(conf.high)
+      ) |>
+      knitr::kable(digits = 3)
+  }
+}
+```
+
+# Análisis Exploratorio de Datos
+
+## Resumen numérico
+
+```{r}
+list(
+  SDQ = summary(time_between_sdq$time_between),
+  COW = summary(time_between_cow$time_between),
+  UCDP = summary(time_between_ucdp$time_between)
+)
+```
+
+## Distribución: histogramas comparado
+
+```{r}
+#| fig.height: 7
+#| fig.width: 7
+
+p_sdq <- ggplot(time_between_sdq, aes(time_between)) +
+  geom_histogram(bins = 30, fill = "steelblue") +
+  labs(
+    x = "Intervalos (meses)",
+    y = "Conteo - SDQ"
+    ) +
+        theme_minimal()
+
+p_cow <- ggplot(time_between_cow, aes(time_between)) +
+  geom_histogram(bins = 30, fill = "firebrick") +
+  labs(
+    x = "Intervalos (meses)",
+    y = "Conteo - COW"
+    ) +
+        theme_minimal()
+
+p_ucdp <- ggplot(time_between_ucdp, aes(time_between)) +
+  geom_histogram(bins = 30, fill = "darkgreen") +
+  labs(
+    x = "Intervalos (meses)",
+    y = "Conteo - UCDP"
+    ) +
+        theme_minimal()
+
+p_sdq / p_cow / p_ucdp
+
+```
+
+## Boxplots para detectar outlier
+
+```{r}
+bind_rows(
+  time_between_sdq |> mutate(dataset = "SDQ"),
+  time_between_cow |> mutate(dataset = "COW"),
+  time_between_ucdp |> mutate(dataset = "UCDP")
+) |>
+  ggplot(aes(x = dataset, y = time_between, fill = dataset)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    y = "Intervalos (escala log 10)",
+    x = "Dataset"
+    ) +
+        theme_minimal()
+# Usamos log10 porque los intervalos pueden ser enormes.
+```
+
+La escala logarítmica permite visualizar la distribución completa sin que los valores extremos compriman el resto de los datos.
+
+## Tendencia temporal
+
+```{r}
+#| fig.height: 7
+#| fig.width: 7
+
+p_sdq <- ggplot(time_between_sdq, aes(year, time_between)) +
+  geom_point(alpha = 0.5) + geom_smooth() +
+  labs(x = "Año", y = "Intervalo (meses) - SDQ") + theme_minimal()
+
+p_cow <- ggplot(time_between_cow, aes(year, time_between)) +
+  geom_point(alpha = 0.5) + geom_smooth() +
+  labs(x = "Año", y = "Intervalo (meses) - COW") + theme_minimal()
+
+p_ucdp <- ggplot(time_between_ucdp, aes(year, time_between)) +
+  geom_point(alpha = 0.5) + geom_smooth() +
+  labs(x = "Año", y = "Intervalo (meses) - UCDP") + theme_minimal()
+
+p_sdq / p_cow / p_ucdp
+
+```
+
+## Comparación por fase
+
+### SDQ
+
+```{r}
+time_between_sdq |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    x = "Fase",
+    y = "Intervalo (meses escala log) - SDQ"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+### COW
+
+```{r}
+time_between_cow |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    x = "Fase",
+    y = "Intervalo (meses escala log) - COW"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+### UCDP
+
+```{r}
+time_between_ucdp |>
+  filter(!is.na(phase)) |>
+  ggplot(aes(phase, time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    x = "Fase",
+    y = "Intervalo (meses escala log) - UCDP"
+  ) +
+  theme_minimal() +
+  coord_flip()
+```
+
+## Comparación por Rimland (solo COW y UCDP)
+
+### COW
+
+```{r}
+time_between_cow |>
+  ggplot(aes(factor(rimland), time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    x = "Rimland (1=Sí, 0=No)",
+    y = "Intervalo (meses escala log) - COW"
+  ) +
+  theme_minimal()
+```
+
+### UCDP
+
+```{r}
+time_between_ucdp |>
+  ggplot(aes(factor(rimland), time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    x = "Rimland (1=Sí, 0=No)",
+    y = "Intervalo (meses escala log) - UCDP"
+  ) +
+  theme_minimal()
+```
+
+## Comparación por shock
+
+### SDQ
+
+```{r}
+time_between_sdq |>
+  select(time_between, shock_1939, shock_1945) |>
+  pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
+  ggplot(aes(factor(valor), time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  facet_wrap(~ shock) +
+  labs(x = "Pre (0) / Post (1)", y = "Intervalo (meses log) - SDQ") +
+  theme_minimal()
+```
+
+### COW
+
+```{r}
+time_between_cow |>
+  select(time_between, shock_1939, shock_1945) |>
+  pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
+  ggplot(aes(factor(valor), time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  facet_wrap(~ shock) +
+  labs(x = "Pre (0) / Post (1)", y = "Intervalo (meses log) - COW") +
+  theme_minimal()
+```
+
+### UCDP
+
+```{r}
+time_between_ucdp |>
+  select(time_between, shock_1945, shock_1991) |>
+  pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
+  ggplot(aes(factor(valor), time_between)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  facet_wrap(~ shock) +
+  labs(x = "Pre (0) / Post (1)", y = "Intervalo (meses log) - UCDP") +
+  theme_minimal()
+```
+
+## Correlación simple con año
+
+**SDQ**
+
+```{r}
+cor.test(time_between_sdq$time_between, time_between_sdq$year)
+```
+
+**COW**
+
+```{r}
+cor.test(time_between_cow$time_between, time_between_cow$year)
+```
+
+**UCDP**
+
+```{r}
+cor.test(time_between_ucdp$time_between, time_between_ucdp$year)
+```
+
+# Revisión de supuestos para el modelo Exponencial
+
+```{r}
+#| echo: false
+sdq <- time_between_sdq |>
+  filter(!is.na(time_between)) |>
+  mutate(
+    phase = recode(
+      phase,
+      "unipolaridad_tardia_multipolaridad_emergente" = "unipol_tard",
+      "unipolaridad_temprana" = "unipol_temp",
+      "multipolaridad_clasica" = "multipol_cl",
+      "entreguerras" = "entreg",
+      "ruptura_sistema" = "rupt_sist",
+      "bipolaridad" = "bipolar"
+    )
+  ) |>
+  mutate(
+    time_between = case_when(
+      time_between == 0 ~ 0.5,
+      TRUE ~ time_between
+    ),
+    phase = factor(phase),
+    shock_1939 = factor(shock_1939),
+    shock_1945 = factor(shock_1945)
+  )
+
+cow <- time_between_cow |>
+  filter(!is.na(time_between)) |>
+  mutate(
+    phase = recode(
+      phase,
+      "unipolaridad_tardia_multipolaridad_emergente" = "unipol_tard",
+      "unipolaridad_temprana" = "unipol_temp",
+      "multipolaridad_clasica" = "multipol_cl",
+      "entreguerras" = "entreg",
+      "ruptura_sistema" = "rupt_sist",
+      "bipolaridad" = "bipolar"
+    )
+  ) |>
+  mutate(
+    time_between = case_when(
+      time_between == 0 ~ 0.5,
+      TRUE ~ time_between
+    ),
+    phase = factor(phase),
+    shock_1939 = factor(shock_1939),
+    shock_1945 = factor(shock_1945),
+    rimland = factor(rimland)
+  )
+
+ucdp <- time_between_ucdp |>
+  filter(!is.na(time_between)) |>
+  mutate(
+    phase = recode(
+      phase,
+      "unipolaridad_tardia_multipolaridad_emergente" = "unipol_tard",
+      "unipolaridad_temprana" = "unipol_temp",
+      "multipolaridad_clasica" = "multipol_cl",
+      "entreguerras" = "entreg",
+      "ruptura_sistema" = "rupt_sist",
+      "bipolaridad" = "bipolar"
+    )
+  ) |>
+  mutate(
+    time_between = case_when(
+      time_between == 0 ~ 0.5,
+      TRUE ~ time_between
+    ),
+    phase = factor(phase),
+    shock_1945 = factor(shock_1945),
+    shock_1991 = factor(shock_1991),
+    rimland = factor(rimland)
+  )
+
+```
+
+## Correlación año–intervalo (esperado ≈ 0 si la tasa es estacionaria)
+
+La magnitud de las correlaciones es muy baja en los tres datasets, lo que respalda la estacionariedad de la tasa λ a lo largo del período: los intervalos no se acortan ni se alargan sistemáticamente con el tiempo calendario. Este supuesto es distinto del de hazard constante en el tiempo transcurrido desde el último evento, que se evalúa en la sección siguiente mediante el parámetro de forma de la Distribución Weibull.
+
+```{r}
+cor(sdq$year, sdq$time_between, use = "complete.obs")
+cor(cow$year, cow$time_between, use = "complete.obs")
+cor(ucdp$year, ucdp$time_between, use = "complete.obs")
+```
+
+## Comparación exponencial vs Weibull (shape ≈ 1)
+
+Se estimaron modelos Exponencial y Weibull base para evaluar si el supuesto de hazard constante es suficiente; el test LR y el AIC determinan la especificación preferida por dataset.
+
+```{r}
+# SDQ
+exp_sdq <- survreg(Surv(time_between) ~ 1, data = sdq, dist = "exponential")
+wei_sdq <- survreg(Surv(time_between) ~ 1, data = sdq, dist = "weibull")
+
+# COW
+exp_cow <- survreg(Surv(time_between) ~ 1, data = cow, dist = "exponential")
+wei_cow <- survreg(Surv(time_between) ~ 1, data = cow, dist = "weibull")
+
+# UCDP
+exp_ucdp <- survreg(Surv(time_between) ~ 1, data = ucdp, dist = "exponential")
+wei_ucdp <- survreg(Surv(time_between) ~ 1, data = ucdp, dist = "weibull")
+
+summary(wei_sdq)
+summary(wei_cow)
+summary(wei_ucdp)
+```
+
+```{r}
+shape_sdq <- 1 / wei_sdq$scale
+shape_cow <- 1 / wei_cow$scale
+shape_ucdp <- 1 / wei_ucdp$scale
+
+shape_sdq
+shape_cow
+shape_ucdp
+```
+
+## Test de razón de verosimilitud (LR test)
+
+```{r}
+# SDQ
+lr_sdq <- 2 * (logLik(wei_sdq) - logLik(exp_sdq))
+pchisq(lr_sdq, df = 1, lower.tail = FALSE)
+
+# COW
+lr_cow <- 2 * (logLik(wei_cow) - logLik(exp_cow))
+pchisq(lr_cow, df = 1, lower.tail = FALSE)
+
+# UCDP
+lr_ucdp <- 2 * (logLik(wei_ucdp) - logLik(exp_ucdp))
+pchisq(lr_ucdp, df = 1, lower.tail = FALSE)
+```
+
+## Comparación AIC
+
+```{r}
+AIC(exp_sdq, wei_sdq)
+AIC(exp_cow, wei_cow)
+AIC(exp_ucdp, wei_ucdp)
+# Si AIC(exponencial) ≈ AIC(weibull) → exponencial es suficiente
+
+```
+
+## Curvas de supervivencia empírica vs exponencial teórica
+
+Las curvas empíricas confirman que la estructura general de los datos es compatible con modelos de supervivencia.
+
+```{r}
+# SDQ
+fit_sdq <- survfit(Surv(time_between) ~ 1, data = sdq)
+ggsurvplot(fit_sdq) + ggtitle("SDQ — Curva empírica de supervivencia")
+
+# COW
+fit_cow <- survfit(Surv(time_between) ~ 1, data = cow)
+ggsurvplot(fit_cow) + ggtitle("COW — Curva empírica de supervivencia")
+
+# UCDP
+fit_ucdp <- survfit(Surv(time_between) ~ 1, data = ucdp)
+ggsurvplot(fit_ucdp) + ggtitle("UCDP — Curva empírica de supervivencia")
+
+```
+
+## Gráfico log(-log(S(t))) vs log(t)
+
+La inclinación de la curva indica si la Weibull supera a la Exponencial: horizontal = Exponencial suficiente; recta inclinada = Weibull preferida.
+
+```{r}
+# Este es el test visual clásico para Weibull:
+# - Si es línea recta → Weibull
+# - Si es curva horizontal → Exponencial (shape = 1)
+
+plot(fit_sdq, fun = "cloglog", main = "SDQ — log(-log(S)) vs log(t)")
+plot(fit_cow, fun = "cloglog", main = "COW — log(-log(S)) vs log(t)")
+plot(fit_ucdp, fun = "cloglog", main = "UCDP — log(-log(S)) vs log(t)")
+```
+
+# Modelos estadísticos
+
+## SDQ
+
+*Variable dependiente: intervalo en meses entre conflictos diádicos consecutivos. Predictores: fase del sistema internacional y shocks de 1939 y 1945. Datos: `time_between_sdq`.*
+
+### Modelo base (Exponencial)
+
+```{r}
+m_sdq_base <- survreg(
+  Surv(time_between) ~ 1,
+  data = sdq,
+  dist = "exponential"
+)
+
+tabla_surv(m_sdq_base)
+# - El modelo predice tiempo esperado entre eventos, no hazard directamente
+# - El coeficiente β afecta el tiempo esperado multiplicándolo por exp(β)
+# - El hazard ratio se obtiene como: HR = exp(−β)
+# Porque hazard = 1 / tiempo esperado.
+# Entonces:
+# - β > 0 → tiempo esperado ↑ → hazard ↓
+# - β < 0 → tiempo esperado ↓ → hazard ↑
+# Y el hazard ratio te dice:
+# “Cuántas veces más (o menos) probable es que ocurra el próximo conflicto en un momento dado.”
+```
+
+### Modelo A — Fases del sistema internacional
+
+```{r}
+# Exponencial
+m_sdq_phase <- survreg(
+  Surv(time_between) ~ phase,
+  data = sdq,
+  dist = "exponential"
+)
+tabla_surv(m_sdq_phase)
+```
+
+```{r}
+# Weibull
+m_sdq_phase_wei <- survreg(
+  Surv(time_between) ~ phase,
+  data = sdq,
+  dist = "weibull"
+)
+tabla_surv(m_sdq_phase_wei)
+```
+
+### Modelo B — Shocks históricos (1939 y 1945)
+
+```{r}
+# Shock 1939
+m_sdq_1939 <- survreg(
+  Surv(time_between) ~ shock_1939,
+  data = sdq,
+  dist = "exponential"
+)
+tabla_surv(m_sdq_1939)
+# Significativo.
+
+# Shock 1945
+m_sdq_1945 <- survreg(
+  Surv(time_between) ~ shock_1945,
+  data = sdq,
+  dist = "exponential"
+)
+tabla_surv(m_sdq_1945)
+# Significativo.
+```
+
+```{r}
+# Shock 1939
+m_sdq_1939_wei <- survreg(
+  Surv(time_between) ~ shock_1939,
+  data = sdq,
+  dist = "weibull"
+)
+tabla_surv(m_sdq_1939_wei)
+# .
+
+# Shock 1945
+m_sdq_1945_wei <- survreg(
+  Surv(time_between) ~ shock_1945,
+  data = sdq,
+  dist = "weibull"
+)
+tabla_surv(m_sdq_1945_wei)
+# .
+```
+
+### Modelo C — Modelo completo (fases + shock 1945)
+
+```{r}
+m_sdq_full <- survreg(
+  Surv(time_between) ~ phase + shock_1945,
+  data = sdq,
+  dist = "exponential"
+)
+tabla_surv(m_sdq_full)
+# No significativo
+```
+
+Ninguna variable alcanza significancia estadística en el modelo full bajo especificación Exponencial para SDQ.
+
+```{r}
+m_sdq_weibull <- survreg(
+  Surv(time_between) ~ phase + shock_1945,
+  data = sdq,
+  dist = "weibull"
+)
+
+tabla_surv(m_sdq_weibull)
+
+
+lr_sdq <- 2 * (logLik(m_sdq_weibull) - logLik(m_sdq_full))
+pchisq(lr_sdq, df = 1, lower.tail = FALSE)
+```
+
+### Comparación de modelos
+
+```{r}
+AIC(
+    m_sdq_base, 
+    m_sdq_phase,
+    m_sdq_phase_wei, 
+    m_sdq_1939,
+    m_sdq_1939_wei,
+    m_sdq_1945,
+    m_sdq_1945_wei,
+    m_sdq_full, 
+    m_sdq_weibull
+    )
+
+```
+
+## COW
+
+*Variable dependiente: intervalo en meses entre conflictos consecutivos. Predictores: fase del sistema internacional, Rimland y shocks de 1939 y 1945. Datos: `time_between_cow`.*
+
+### Modelo base (Exponencial)
+
+```{r}
+
+m_cow_base <- survreg(
+  Surv(time_between) ~ 1,
+  data = cow,
+  dist = "exponential"
+)
+tabla_surv(m_cow_base)
+```
+
+### Modelo A — Fases del sistema internacional
+
+```{r}
+# Exponencial
+m_cow_phase <- survreg(
+  Surv(time_between) ~ phase,
+  data = cow,
+  dist = "exponential"
+)
+tabla_surv(m_cow_phase)
+```
+
+### Modelo B — Shocks históricos (1939 y 1945)
+
+#### Shock 1939
+
+```{r}
+m_cow_1939 <- survreg(
+  Surv(time_between) ~ shock_1939,
+  data = cow,
+  dist = "exponential"
+)
+tabla_surv(m_cow_1939)
+```
+
+El shock de 1939 no produce un efecto significativo sobre el intervalo entre conflictos en COW.
+
+#### Shock 1945
+
+```{r}
+m_cow_1945 <- survreg(
+  Surv(time_between) ~ shock_1945,
+  data = cow,
+  dist = "exponential"
+)
+tabla_surv(m_cow_1945)
+```
+
+El shock de 1945 no produce un efecto significativo sobre el intervalo entre conflictos en COW.
+
+### Modelo C — Rimland
+
+```{r}
+# Exponencial
+m_cow_rimland <- survreg(
+  Surv(time_between) ~ rimland,
+  data = cow,
+  dist = "exponential"
+)
+tabla_surv(m_cow_rimland)
+```
+
+### Modelo D — Modelo completo (fases + Rimland + shock 1945)
+
+```{r}
+m_cow_full <- survreg(
+  Surv(time_between) ~ phase + rimland + shock_1945,
+  data = cow,
+  dist = "exponential"
+)
+tabla_surv(m_cow_full)
+
+```
+
+### Comparación de modelos
+
+```{r}
+AIC(
+    m_cow_base, 
+    m_cow_phase, 
+    m_cow_rimland, 
+    m_cow_1939, 
+    m_cow_1945, 
+    m_cow_full
+    )
+
+```
+
+## UCDP
+
+*Variable dependiente: intervalo en meses entre conflictos consecutivos. Predictores: fase del sistema internacional, Rimland y shocks de 1945 y 1991. Datos: `time_between_ucdp`.*
+
+### Modelo base (Exponencial)
+
+```{r}
+# Exponencial
+m_ucdp_base <- survreg(
+  Surv(time_between) ~ 1,
+  data = ucdp,
+  dist = "exponential"
+)
+tabla_surv(m_ucdp_base)
+
+```
+
+### Modelo A — Fases del sistema internacional
+
+```{r}
+# Exponencial
+m_ucdp_phase <- survreg(
+  Surv(time_between) ~ phase,
+  data = ucdp,
+  dist = "exponential"
+)
+tabla_surv(m_ucdp_phase)
+```
+
+### Modelo B — Shocks históricos (1945 y 1991)
+
+```{r}
+# Exponencial
+m_ucdp_1945 <- survreg(
+  Surv(time_between) ~ shock_1945,
+  data = ucdp,
+  dist = "exponential"
+)
+tabla_surv(m_ucdp_1945)
+```
+
+```{r}
+# Exponencial
+m_ucdp_1991 <- survreg(
+  Surv(time_between) ~ shock_1991,
+  data = ucdp,
+  dist = "exponential"
+)
+tabla_surv(m_ucdp_1991)
+# No significativo.
+```
+
+El shock de 1991 no produce un efecto significativo sobre el intervalo entre conflictos en UCDP.
+
+### Modelo C — Rimland
+
+```{r}
+# Exponencial
+m_ucdp_rimland <- survreg(
+  Surv(time_between) ~ rimland,
+  data = ucdp,
+  dist = "exponential"
+)
+tabla_surv(m_ucdp_rimland)
+```
+
+### Modelo D — Modelo completo (fases + Rimland + shocks)
+
+```{r}
+m_ucdp_full <- survreg(
+  Surv(time_between) ~ phase + rimland + shock_1945 + shock_1991,
+  data = ucdp,
+  dist = "exponential"
+)
+tabla_surv(m_ucdp_full)
+```
+
+```{r}
+AIC(
+  m_ucdp_base,
+  m_ucdp_phase,
+  m_ucdp_rimland,
+  m_ucdp_1945,
+  m_ucdp_1991,
+  m_ucdp_full
+)
+```
+
+# Verificación por Teoremas Límite
+
+La dimensión de intervalo permite una verificación adicional del andamiaje probabilístico mediante los dos teoremas límite fundamentales de la Teoría de la Probabilidad (Sagula, 2004, p. 211). Si los conflictos armados siguen un proceso de Poisson con tasa λ, los intervalos entre eventos consecutivos deben ser variables aleatorias independientes e idénticamente distribuidas (i.i.d.) con Distribución Exponencial de media μ = 1/λ. Esta propiedad implica dos consecuencias verificables empíricamente:
+
+-   **Ley de los Grandes Números (LGN):** la media muestral de los intervalos debe converger en probabilidad a μ = 1/λ conforme n → ∞.
+-   **Teorema Central del Límite (TCL):** la suma de k intervalos consecutivos debe aproximarse a una Distribución Normal conforme k → ∞.
+
+Para que la verificación sea informativa, λ no se estima sobre la propia serie de intervalos (en cuyo caso 1/λ coincidiría con la media muestral por construcción, ya que ése es su estimador máximo verosímil bajo la Distribución Exponencial) sino que se toma de la dimensión de frecuencia (Anexo 1, A1.2.1): la tasa anual media de conflictos iniciados, expresada en meses. La comparación contrasta así el proceso de conteo con el proceso de intervalo, que es exactamente la dualidad Poisson–Exponencial que el andamiaje presupone.
+
+```{r}
+#| include: false
+
+# Función de verificación de Teoremas Límite
+# -------------------------------------------------
+# Aplica LGN y TCL a un dataset de intervalos y devuelve
+# gráficos y estadísticos de verificación.
+#
+# Argumentos:
+#   data       : dataset con columna time_between (intervalos en meses),
+#                la misma serie usada en los modelos (ceros ya sustituidos por 0,5)
+#   fuente     : nombre del dataset para etiquetas ("SDQ", "COW", "UCDP")
+#   lambda_est : tasa λ mensual tomada de la dimensión de frecuencia
+#                (tasa anual media / 12), NO de la serie de intervalos
+#
+# La media teórica se calcula como μ = 1/λ dentro de la función.
+
+verificar_teoremas_limite <- function(data, fuente, lambda_est) {
+
+  # Misma serie que los modelos de la sección anterior
+  intervalos <- data |> filter(!is.na(time_between)) |> pull(time_between)
+
+  n_total       <- length(intervalos)
+  media_teorica <- 1 / lambda_est   # E[T] = 1/λ bajo Distribución Exponencial
+
+  # ── LEY DE LOS GRANDES NÚMEROS ──────────────────────────────────────────
+  # Media acumulada después de n observaciones: x̄_n = (X_1+...+X_n) / n
+  # Por la LGN, x̄_n → μ conforme n → ∞.
+  # El gráfico verifica visualmente la estabilización en torno a la línea roja (μ = 1/λ).
+
+  medias_acumuladas <- cumsum(intervalos) / seq_along(intervalos)
+
+  df_lgn <- tibble(
+    n                = seq_along(intervalos),
+    media_acumulada  = medias_acumuladas
+  )
+
+  # ── GRÁFICO LGN ──────────────────────────────────────────────────────────
+p_lgn <- ggplot(df_lgn, aes(x = n, y = media_acumulada)) +
+  geom_line(color = "#2C7BB6", linewidth = 0.6) +
+  geom_hline(
+    yintercept = media_teorica,
+    linetype   = "dashed",
+    color      = "#D7191C",
+    linewidth  = 0.8
+  ) +
+  # Forzar el valor de la media teórica como etiqueta en el eje Y
+  scale_y_continuous(
+    breaks = function(x) {
+      b <- scales::breaks_pretty()(x)
+      sort(unique(c(b, round(media_teorica, 2))))
+    }
+  ) +
+  labs(
+    title = fuente,
+    x     = "n (intervalos acumulados)",
+    y     = "Media acumulada (meses)"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+  # ── TEOREMA CENTRAL DEL LÍMITE ───────────────────────────────────────────
+  # Se dividen los intervalos en grupos de tamaño k = 30.
+  # Para cada grupo i se calcula S_i = X_{(i-1)k+1} + ... + X_{ik}.
+  # Por el TCL, las S_i deben aproximarse a una Distribución Normal.
+  # El test de Shapiro-Wilk evalúa formalmente esa normalidad:
+  #   H₀: las sumas siguen una Distribución Normal
+  #   p > 0.05 → no se rechaza H₀ → TCL verificado
+  #   p < 0.05 → se rechaza H₀
+
+  k        <- 30
+  n_grupos <- floor(n_total / k)
+
+  sumas <- map_dbl(1:n_grupos, function(i) {
+    sum(intervalos[((i - 1) * k + 1):(i * k)])
+  })
+
+  sw_test <- shapiro.test(sumas)
+  df_tcl  <- tibble(sumas = sumas)
+
+# ── GRÁFICO TCL ──────────────────────────────────────────────────────────
+p_tcl <- ggplot(df_tcl, aes(sample = sumas)) +
+  stat_qq(color = "#2C7BB6", alpha = 0.7) +
+  stat_qq_line(color = "#D7191C", linetype = "dashed") +
+  labs(
+    title    = fuente,
+    subtitle = paste0(
+      "W=", round(sw_test$statistic, 3),
+      "  p=", round(sw_test$p.value, 3),
+      "  grupos=", n_grupos
+    ),
+    x = "Cuantiles teóricos (Normal)",
+    y = "Suma de intervalos (meses)"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+  list(
+    p_lgn          = p_lgn,
+    p_tcl          = p_tcl,
+    sw_test        = sw_test,
+    media_muestral = mean(intervalos),
+    media_teorica  = media_teorica,
+    n              = n_total,
+    n_grupos       = n_grupos,
+    k              = k
+  )
+}
+
+# Aplicar a las tres fuentes
+# λ mensual = tasa anual media de la dimensión de frecuencia / 12
+# (medias anuales de A1.2.1: sdq 5,448; cow 3,698; ucdp 3,651)
+res_sdq  <- verificar_teoremas_limite(sdq,  "SDQ",  lambda_est = 5.447552 / 12)
+res_cow  <- verificar_teoremas_limite(cow,  "COW",  lambda_est = 3.698492 / 12)
+res_ucdp <- verificar_teoremas_limite(ucdp, "UCDP", lambda_est = 3.650602 / 12)
+```
+
+## Ley de los Grandes Números
+
+La LGN predice que la media muestral acumulada se estabiliza en torno al valor teórico μ = 1/λ. La Figura siguiente muestra esa trayectoria en las tres fuentes.
+
+```{r}
+#| fig.height: 3
+#| fig.width: 7
+#| label: fig-lgn
+#| fig-cap: "Estabilización de la media muestral acumulada en torno a la media teórica 1/λ (línea roja), con λ tomado de la dimensión de frecuencia, en las tres fuentes. La estabilización rápida y sin oscilaciones persistentes es consistente con la hipótesis de intervalos i.i.d. bajo Distribución Exponencial."
+
+# Figura LGN
+(res_sdq$p_lgn | res_cow$p_lgn | res_ucdp$p_lgn) +
+  plot_annotation(
+    title    = "Ley de los Grandes Números",
+    subtitle = paste0(
+      "Media teórica (1/λ): SDQ=", round(res_sdq$media_teorica, 2),
+      " | COW=", round(res_cow$media_teorica, 2),
+      " | UCDP=", round(res_ucdp$media_teorica, 2),
+      " meses (línea roja)"
+    ),
+    theme = theme(
+      plot.title    = element_text(face = "bold", size = 11),
+      plot.subtitle = element_text(size = 9, color = "grey40")
+    )
+  )
+```
+
+```{r}
+#| include: false
+
+# Tabla de resultados LGN para texto
+lgn_tabla <- tibble(
+  Fuente           = c("SDQ", "COW", "UCDP"),
+  n                = c(res_sdq$n, res_cow$n, res_ucdp$n),
+  media_muestral   = c(res_sdq$media_muestral, res_cow$media_muestral, res_ucdp$media_muestral),
+  media_teorica    = c(res_sdq$media_teorica,  res_cow$media_teorica,  res_ucdp$media_teorica),
+  diferencia       = abs(media_muestral - media_teorica),
+  diferencia_rel   = diferencia / media_teorica
+)
+```
+
+La media muestral acumulada se estabiliza sin oscilaciones persistentes en las tres fuentes y converge a un valor próximo a 1/λ. La discrepancia residual es mayor en SDQ (18%), donde la resolución anual de las fechas y la simultaneidad de díadas concentran masa en 0,5 meses, intermedia en COW (9%) y menor en UCDP (4%), la fuente con mayor resolución temporal.
+
+```{r}
+#| label: tbl-lgn
+#| tbl-cap: "Verificación de la LGN: media muestral vs. media teórica 1/λ (λ tomado de la dimensión de frecuencia)."
+
+lgn_tabla |>
+  rename(
+    `n` = n,
+    `Media muestral (meses)` = media_muestral,
+    `Media teórica 1/λ (meses)` = media_teorica,
+    `Diferencia absoluta` = diferencia,
+    `Diferencia relativa` = diferencia_rel
+  ) |>
+  knitr::kable(digits = c(0, 0, 2, 2, 2, 3))
+```
+
+## Teorema Central del Límite
+
+El TCL predice que la suma de k intervalos consecutivos converge a una Distribución Normal. Se evaluó mediante el test de Shapiro-Wilk sobre sumas de grupos de k = 30 intervalos, y Q-Q plots de normalidad.
+
+```{r}
+#| fig.height: 3
+#| fig.width: 7
+#| label: fig-tcl
+#| fig-cap: "Q-Q plots de normalidad sobre sumas de k=30 intervalos consecutivos. Los puntos sobre la línea roja indican ajuste normal."
+
+# Figura TCL
+(res_sdq$p_tcl | res_cow$p_tcl | res_ucdp$p_tcl) +
+  plot_annotation(
+    title    = "Teorema Central del Límite — Q-Q Normal",
+    subtitle = paste0("Sumas de k=", res_sdq$k, " intervalos consecutivos por grupo"),
+    theme = theme(
+      plot.title    = element_text(face = "bold", size = 11),
+      plot.subtitle = element_text(size = 9, color = "grey40")
+    )
+  )
+```
+
+```{r}
+#| label: tbl-tcl
+#| tbl-cap: "Verificación del TCL: test de Shapiro-Wilk sobre sumas de k=30 intervalos. H₀: normalidad. p > 0,05 → TCL verificado."
+
+tibble(
+  Fuente    = c("SDQ", "COW", "UCDP"),
+  k         = c(res_sdq$k,        res_cow$k,        res_ucdp$k),
+  n_grupos  = c(res_sdq$n_grupos, res_cow$n_grupos, res_ucdp$n_grupos),
+  W         = c(res_sdq$sw_test$statistic, res_cow$sw_test$statistic, res_ucdp$sw_test$statistic),
+  p_value   = c(res_sdq$sw_test$p.value,   res_cow$sw_test$p.value,   res_ucdp$sw_test$p.value)
+) |>
+  mutate(Resultado = if_else(p_value > 0.05, "TCL verificado", "No verificado")) |>
+  rename(
+    `k (tamaño grupo)` = k,
+    `N grupos` = n_grupos,
+    `W` = W,
+    `p-value` = p_value,
+    `Conclusión` = Resultado
+  ) |>
+  knitr::kable(digits = 3)
+```
+
+El TCL se verifica en COW (W=0,931; p=0,103; 24 grupos) y UCDP (W=0,945; p=0,613; 10 grupos). En SDQ el test rechaza la normalidad (W=0,845; p=0,001; 25 grupos). El resultado es atribuible a la estructura de la serie y no a un tamaño de grupo insuficiente: en SDQ las fechas tienen resolución anual y la mayoría de las díadas comparte año de inicio, de modo que la distribución de intervalos concentra masa en 0,5 meses con saltos discretos de 12 meses; sumas de k = 30 observaciones de una mezcla tan asimétrica convergen a la normalidad más lentamente de lo que el TCL predice para una Exponencial continua. La misma característica explica que SDQ presente la mayor discrepancia en la LGN y la función de riesgo decreciente detectada por la Distribución Weibull en la sección de supuestos.
+
+En conjunto, la verificación de la LGN en las tres fuentes y del TCL en COW y UCDP es consistente con la hipótesis de que los intervalos entre conflictos siguen una Distribución Exponencial y valida empíricamente el uso de modelos de supervivencia paramétricos en esta dimensión. En SDQ la evidencia es más débil, en línea con el resto del anexo.

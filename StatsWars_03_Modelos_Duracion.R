@@ -5,14 +5,14 @@ library(survival)
 library(survminer)
 
 # Input ------------------------------------------------------------------
-anu_frec_cow <- readRDS("data_gold/anu_frec_cow.rds")
-anu_frec_sdq <- readRDS("data_gold/anu_frec_sdq.rds")
-anu_frec_ucdp <- readRDS("data_gold/anu_frec_ucdp.rds")
-anu_frec_ucdp_War <- readRDS("data_gold/anu_frec_ucdp_War.rds")
+anu_frec_cow <- readRDS("Data/data_gold/anu_frec_cow.rds")
+anu_frec_sdq <- readRDS("Data/data_gold/anu_frec_sdq.rds")
+anu_frec_ucdp <- readRDS("Data/data_gold/anu_frec_ucdp.rds")
+anu_frec_ucdp_War <- readRDS("Data/data_gold/anu_frec_ucdp_War.rds")
 
-conf_durint_cow <- readRDS("data_gold/conf_durint_cow.rds")
-conf_durint_sdq <- readRDS("data_gold/conf_durint_sdq.rds")
-conf_durint_ucdp <- readRDS("data_gold/conf_durint_ucdp.rds")
+conf_durint_cow <- readRDS("Data/data_gold/conf_durint_cow.rds")
+conf_durint_sdq <- readRDS("Data/data_gold/conf_durint_sdq.rds")
+conf_durint_ucdp <- readRDS("Data/data_gold/conf_durint_ucdp.rds")
 
 
 # Revision de supuestos --------------------------------------------------
@@ -57,7 +57,7 @@ ggsurvplot(fit_ucdp)
 # - la interpretación es más directa
 # - no hay que especificar Surv(time, event), solo Surv(time)
 
-# Tus datasets ya están reconstruidos a nivel de conflicto completo:
+# Los datasets ya están reconstruidos a nivel de conflicto completo:
 # - todos los conflictos tienen fecha de inicio y fin
 # - no hay conflictos “abiertos”
 # - no hay censura a derecha

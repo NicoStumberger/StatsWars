@@ -28,8 +28,8 @@ theme_set(theme_minimal())
 
 # Función para asegurar 300 dpi en todas las figuras
 knitr::opts_chunk$set(
-  fig.dpi = 300,
-  fig.width = 5,
+  fig.dpi = 800,
+  fig.width = 7,
   fig.height = 3
 )
 
@@ -37,6 +37,39 @@ knitr::opts_chunk$set(
 conf_durint_cow <- readRDS("data_gold/conf_durint_cow.rds")
 conf_durint_sdq <- readRDS("data_gold/conf_durint_sdq.rds")
 conf_durint_ucdp <- readRDS("data_gold/conf_durint_ucdp.rds")
+
+# Tabla de coeficientes para modelos de supervivencia --------------------
+# survreg (AFT): TR = exp(beta) es el time ratio.
+#   Exponencial: HR = exp(-beta)          (sigma = 1)
+#   Weibull:     HR = exp(-beta / sigma)  (sigma = parámetro scale)
+#   La fila Log(scale) no tiene HR; su TR = sigma.
+# coxph (PH): el coeficiente ya es log(HR); HR = exp(beta). No existe TR.
+tabla_surv <- function(modelo) {
+  td <- broom::tidy(modelo, conf.int = TRUE)
+  if (inherits(modelo, "coxph")) {
+    td |>
+      transmute(
+        term, estimate,
+        HR = exp(estimate),
+        p.value,
+        conf.low.HR  = exp(conf.low),
+        conf.high.HR = exp(conf.high)
+      ) |>
+      knitr::kable(digits = 3)
+  } else {
+    sigma <- modelo$scale
+    td |>
+      transmute(
+        term, estimate,
+        TR = exp(estimate),
+        HR = if_else(term == "Log(scale)", NA_real_, exp(-estimate / sigma)),
+        p.value,
+        conf.low.TR  = exp(conf.low),
+        conf.high.TR = exp(conf.high)
+      ) |>
+      knitr::kable(digits = 3)
+  }
+}
 ```
 
 # Análisis Exploratorio de Datos
@@ -65,97 +98,113 @@ p_sdq / p_cow / p_ucdp
 
 ## Duración por fase del sistema internacional
 
+### SDQ
 ```{r}
 conf_durint_sdq |>
   filter(!is.na(phase)) |>
   ggplot(aes(phase, months)) +
   geom_boxplot() +
-  labs(
-    x = "Fase",
-    y = "Número de conflictos (SDQ)"
-  ) +
+  labs(x = "Fase", y = "Duración (meses) - SDQ") +
   theme_minimal() +
   coord_flip()
+```
 
+### COW
+```{r}
 conf_durint_cow |>
   filter(!is.na(phase)) |>
   ggplot(aes(phase, months)) +
   geom_boxplot() +
-  labs(
-    x = "Fase",
-    y = "Número de conflictos (COW)"
-  ) +
+  labs(x = "Fase", y = "Duración (meses) - COW") +
   theme_minimal() +
   coord_flip()
+```
 
+### UCDP
+```{r}
 conf_durint_ucdp |>
   filter(!is.na(phase)) |>
   ggplot(aes(phase, months)) +
   geom_boxplot() +
-  labs(
-    x = "Fase",
-    y = "Número de conflictos (UCDP)"
-  ) +
+  labs(x = "Fase", y = "Duración (meses) - UCDP") +
   theme_minimal() +
   coord_flip()
-
 ```
 
 ## Curvas de Kaplan–Meier por fase
 
+### SDQ
 ```{r}
 fit_sdq <- survfit(Surv(months) ~ phase, data = conf_durint_sdq)
 ggsurvplot(fit_sdq)
+```
 
+### COW
+```{r}
 fit_cow <- survfit(Surv(months) ~ phase, data = conf_durint_cow)
 ggsurvplot(fit_cow)
+```
 
+### UCDP
+```{r}
 fit_ucdp <- survfit(Surv(months) ~ phase, data = conf_durint_ucdp)
 ggsurvplot(fit_ucdp)
 ```
 
 ## Rimland vs. no‑Rimland (COW y UCDP)
 
+### COW
 ```{r}
 ggplot(conf_durint_cow, aes(factor(rimland), months)) +
   geom_boxplot() +
   labs(
-    x = "Año",
-    y = "Número de conflictos (COW)"
+    x = "Rimland (1=Sí, 0=No)",
+    y = "Duración (meses) - COW"
   ) +
   theme_minimal()
+```
 
-
+### UCDP
+```{r}
 ggplot(conf_durint_ucdp, aes(factor(rimland), months)) +
   geom_boxplot() +
   labs(
-    x = "Año",
-    y = "Número de conflictos (COW)"
+    x = "Rimland (1=Sí, 0=No)",
+    y = "Duración (meses) - UCDP"
   ) +
   theme_minimal()
-
 ```
 
+### COW
 ```{r}
-# Ver si rimland aporta algo en duración
 coxph(Surv(months) ~ rimland, data = conf_durint_cow)
+```
 
+### UCDP
+```{r}
 coxph(Surv(months) ~ rimland, data = conf_durint_ucdp)
 ```
 
 ## Test formal de riesgos proporcionales (Cox.zph)
 
+### SDQ
 ```{r}
 coxph(Surv(months) ~ phase, data = conf_durint_sdq) |> cox.zph()
+```
 
+### COW
+```{r}
 coxph(Surv(months) ~ phase, data = conf_durint_cow) |> cox.zph()
+```
 
+### UCDP
+```{r}
 coxph(Surv(months) ~ phase, data = conf_durint_ucdp) |> cox.zph()
-
 ```
 
 ## Duración por shocks históricos
 
+### SDQ
 ```{r}
 conf_durint_sdq |>
   select(months, shock_1914, shock_1939, shock_1945) |>
@@ -165,7 +214,10 @@ conf_durint_sdq |>
   facet_wrap(~ shock) +
   labs(x = "Pre (0) / Post (1)", y = "Duración (meses) - SDQ") +
   theme_minimal()
+```
 
+### COW
+```{r}
 conf_durint_cow |>
   select(months, shock_1914, shock_1939, shock_1945, shock_1991) |>
   pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
@@ -174,7 +226,10 @@ conf_durint_cow |>
   facet_wrap(~ shock) +
   labs(x = "Pre (0) / Post (1)", y = "Duración (meses) - COW") +
   theme_minimal()
+```
 
+### UCDP
+```{r}
 conf_durint_ucdp |>
   select(months, shock_1945, shock_1991, shock_2001) |>
   pivot_longer(starts_with("shock_"), names_to = "shock", values_to = "valor") |>
@@ -193,7 +248,7 @@ Los modelos de supervivencia paramétricos requieren tiempos estrictamente posit
 
 ## Forma del hazard
 
-En modelos Weibull estimados con survreg(), el parámetro scale determina la forma del hazard: scale > 1 indica hazard creciente — cuanto más tiempo dura el conflicto, más probable que termine — y scale < 1 indica hazard decreciente. A diferencia de la dimensión de intervalo, donde SDQ mostraba hazard decreciente, en duración se espera encontrar hazard creciente: los conflictos más prolongados tienen mayor probabilidad de resolución en cada momento adicional.
+En modelos Weibull estimados con survreg(), el parámetro scale (σ) se relaciona con el parámetro de forma estándar mediante k = 1/σ: σ < 1 (k > 1) indica hazard creciente — cuanto más tiempo dura el conflicto, más probable que termine — y σ > 1 (k < 1) indica hazard decreciente. Los tres datasets presentan σ > 1 (1,25 en SDQ; 1,30 en COW; 1,84 en UCDP), es decir, hazard de terminación decreciente: cuanto más se prolonga un conflicto, menor es la probabilidad instantánea de que termine. Este resultado, contrario a la expectativa inicial de hazard creciente, se interpreta en el cuerpo de la tesis (Sección 8.3.1). En las tablas que siguen, el HR de los modelos Weibull se calcula como exp(−β/σ); en los modelos Exponencial, con σ = 1, se reduce a exp(−β). En los modelos de Cox el coeficiente ya es log(HR) y no se reporta TR.
 
 ## Evidencia visual: curvas de Kaplan–Meier
 
@@ -229,33 +284,19 @@ sdq <- conf_durint_sdq |>
 
 m_exp_base_sdq <- survreg(Surv(months) ~ 1, data = sdq, dist = "exponential")
 
-broom::tidy(m_exp_base_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_base_sdq)
 ```
 
 ```{r}
 m_wei_base_sdq <- survreg(Surv(months) ~ 1, data = sdq, dist = "weibull")
 
-broom::tidy(m_wei_base_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_base_sdq)
 # En Weibull, el intercepto NO es el log de la media, sino del tiempo característico (location parameter), que se interpreta como una mediana transformada.
 ```
+
+En la especificación Weibull, el intercepto no representa el logaritmo 
+de la media sino el parámetro de localización (tiempo característico), 
+interpretable como una mediana transformada. 
 
 Comparación de modelos base:
 
@@ -272,31 +313,13 @@ m_exp_phase_sdq <- survreg(
   data = sdq,
   dist = "exponential"
 )
-broom::tidy(m_exp_phase_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_phase_sdq)
 ```
 
 ```{r}
 # Weibull
 m_wei_phase_sdq <- survreg(Surv(months) ~ phase, data = sdq, dist = "weibull")
-broom::tidy(m_wei_phase_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_phase_sdq)
 ```
 
 
@@ -306,16 +329,7 @@ m_cox_phase_sdq <- coxph(
   data = sdq
 )
 
-broom::tidy(m_cox_phase_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_phase_sdq)
 ```
 
 ### Modelo B — Shocks históricos (1939 y 1945)
@@ -326,45 +340,18 @@ m_exp_39_sdq <- survreg(
   data = sdq,
   dist = "exponential"
 )
-broom::tidy(m_exp_39_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_39_sdq)
 ```
 
 ```{r}
 m_wei_39_sdq <- survreg(Surv(months) ~ shock_1939, data = sdq, dist = "weibull")
-broom::tidy(m_wei_39_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_39_sdq)
 ```
 
 ```{r}
 m_cox_39_sdq <- coxph(Surv(months) ~ shock_1939, data = sdq)
 
-broom::tidy(m_cox_39_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_39_sdq)
 
 cox.zph(m_cox_39_sdq)
 ```
@@ -375,45 +362,18 @@ m_exp_45_sdq <- survreg(
   data = sdq,
   dist = "exponential"
 )
-broom::tidy(m_exp_45_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_45_sdq)
 ```
 
 ```{r}
 m_wei_45_sdq <- survreg(Surv(months) ~ shock_1945, data = sdq, dist = "weibull")
-broom::tidy(m_wei_45_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_45_sdq)
 
 ```
 
 ```{r}
 m_cox_45_sdq <- coxph(Surv(months) ~ shock_1945, data = sdq)
-broom::tidy(m_cox_45_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_45_sdq)
 
 cox.zph(m_cox_45_sdq)
 ```
@@ -427,16 +387,7 @@ m_exp_full_sdq <- survreg(
   dist = "exponential"
 )
 
-broom::tidy(m_exp_full_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_full_sdq)
 ```
 
 ```{r}
@@ -446,16 +397,7 @@ m_wei_full_sdq <- survreg(
   dist = "weibull"
 )
 
-broom::tidy(m_wei_full_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_full_sdq)
 ```
 
 ```{r}
@@ -464,16 +406,7 @@ m_cox_full_sdq <- coxph(
   data = sdq
 )
 
-broom::tidy(m_cox_full_sdq, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_full_sdq)
 
 cox.zph(m_cox_full_sdq)
 ```
@@ -534,30 +467,12 @@ cow <- conf_durint_cow |>
 
 ```{r}
 m_exp_base_cow <- survreg(Surv(months) ~ 1, data = cow, dist = "exponential")
-broom::tidy(m_exp_base_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_base_cow)
 ```
 
 ```{r}
 m_wei_base_cow <- survreg(Surv(months) ~ 1, data = cow, dist = "weibull")
-broom::tidy(m_wei_base_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_base_cow)
 ```
 
 Comparación de AIC:
@@ -575,46 +490,19 @@ m_exp_phase_cow <- survreg(
   data = cow,
   dist = "exponential"
 )
-broom::tidy(m_exp_phase_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_phase_cow)
 ```
 
 ```{r}
 # Weibull
 m_wei_phase_cow <- survreg(Surv(months) ~ phase, data = cow, dist = "weibull")
-broom::tidy(m_wei_phase_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_phase_cow)
 ```
 
 ```{r}
 # Cox
 m_cox_phase_cow <- coxph(Surv(months) ~ phase, data = cow)
-broom::tidy(m_cox_phase_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_phase_cow)
 ```
 
 ### Modelo B — Shocks históricos (1939 y 1945)
@@ -626,16 +514,7 @@ m_exp_39_cow <- survreg(
   data = cow,
   dist = "exponential"
 )
-broom::tidy(m_exp_39_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_39_cow)
 # Antes de 1939, la duración media estimada de una guerra interestatal en COW es ~18 meses.
 # Después de 1939, las guerras interestatales duran ~85% más que antes. ~33.5 meses
 # Es significativo
@@ -643,16 +522,7 @@ broom::tidy(m_exp_39_cow, conf.int = TRUE) |>
 
 ```{r}
 m_wei_39_cow <- survreg(Surv(months) ~ shock_1939, data = cow, dist = "weibull")
-broom::tidy(m_wei_39_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_39_cow)
 # Antes de 1939, la duración típica de una guerra interestatal en COW es ~16 meses.
 # Después de 1939, las guerras interestatales duran ~82% más que antes ~29 meses
 # Es significativo.
@@ -661,16 +531,7 @@ broom::tidy(m_wei_39_cow, conf.int = TRUE) |>
 
 ```{r}
 m_cox_39_cow <- coxph(Surv(months) ~ shock_1939, data = cow)
-broom::tidy(m_cox_39_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_39_cow)
 # Después de 1939, el hazard es 36% menor que antes de 1939. Guerras más largas después de 1939.
 # Es significativo.
 # Incluso en el extremo más conservador, el hazard cae un 25%.
@@ -693,16 +554,7 @@ m_exp_45_cow <- survreg(
   data = cow,
   dist = "exponential"
 )
-broom::tidy(m_exp_45_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_45_cow)
 # Antes de 1945, la duración media estimada de una guerra interestatal en COW es ~18 meses
 # Después de 1945, las guerras interestatales duran ~88% más que antes. ~33.9 meses
 # Es significativo
@@ -710,16 +562,7 @@ broom::tidy(m_exp_45_cow, conf.int = TRUE) |>
 
 ```{r}
 m_wei_45_cow <- survreg(Surv(months) ~ shock_1945, data = cow, dist = "weibull")
-broom::tidy(m_wei_45_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_45_cow)
 # Antes de 1945, la duración típica de una guerra interestatal en COW es ~16 meses.
 # Después de 1945, las guerras duran ~85% más que antes. ~29.5 meses
 # Es significativo.
@@ -728,19 +571,10 @@ broom::tidy(m_wei_45_cow, conf.int = TRUE) |>
 
 ```{r}
 m_cox_45_cow <- coxph(Surv(months) ~ shock_1945, data = cow)
-broom::tidy(m_cox_45_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_45_cow)
 # Después de 1945, el hazard es 36.7% menor que antes de 1945.
 # Las guerras duran mucho más después de 1945.
-# Es singnificativo.
+# Es significativo.
 # Incluso en el extremo más conservador, el hazard cae un 26%.
 # En el extremo superior, cae un 46%
 # Concordance = 0.547. El modelo predice un poco mejor que el azar, pero no mucho.
@@ -755,22 +589,13 @@ cox.zph(m_cox_45_cow)
 ### Modelo C — Rimland vs. no‑Rimland
 
 ```{r}
-# Explonencial
+# Exponencial
 m_exp_rim_cow <- survreg(
   Surv(months) ~ rimland,
   data = cow,
   dist = "exponential"
 )
-broom::tidy(m_exp_rim_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_rim_cow)
 # Las guerras interestatales fuera del rimland duran típicamente ~25 meses.
 # Las guerras en el rimland duran solo un 7% menos que las guerras fuera del rimland.
 # No es significativo.
@@ -779,16 +604,7 @@ broom::tidy(m_exp_rim_cow, conf.int = TRUE) |>
 ```{r}
 # Weibull
 m_wei_rim_cow <- survreg(Surv(months) ~ rimland, data = cow, dist = "weibull")
-broom::tidy(m_wei_rim_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_rim_cow)
 # Las guerras interestatales fuera del rimland duran típicamente ~21 meses.
 # Las guerras en el rimland duran solo un 7.5% menos que las guerras fuera del rimland
 # No es significativo
@@ -797,16 +613,7 @@ broom::tidy(m_wei_rim_cow, conf.int = TRUE) |>
 ```{r}
 # Cox
 m_cox_rim_cow <- coxph(Surv(months) ~ rimland, data = conf_durint_cow)
-broom::tidy(m_cox_rim_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_rim_cow)
 # Las guerras en el rimland tienen un hazard 5.3% mayor que las guerras fuera del rimland.
 # No es significativo
 # Concordance = 0.509
@@ -826,16 +633,7 @@ m_exp_full_cow <- survreg(
   data = cow,
   dist = "exponential"
 )
-broom::tidy(m_exp_full_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_full_cow)
 ```
 
 ```{r}
@@ -845,16 +643,7 @@ m_wei_full_cow <- survreg(
   dist = "weibull"
 )
 
-broom::tidy(m_wei_full_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_full_cow)
 ```
 
 ```{r}
@@ -862,16 +651,7 @@ m_cox_full_cow <- coxph(
   Surv(months) ~ phase + shock_1939 + shock_1945 + rimland,
   data = cow
 )
-broom::tidy(m_cox_full_cow, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_full_cow)
 cox.zph(m_cox_full_cow)
 ```
 
@@ -931,16 +711,7 @@ m_exp_base_ucdp <- survreg(
   data = ucdp,
   dist = "exponential"
 )
-broom::tidy(m_exp_base_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_base_ucdp)
 # La duración típica de un conflicto UCDP es de ~172 meses (~14.3 años)
 ```
 
@@ -951,16 +722,7 @@ m_wei_base_ucdp <- survreg(
   data = ucdp,
   dist = "weibull"
 )
-broom::tidy(m_wei_base_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_base_ucdp)
 # La duración típica de un conflicto UCDP es de ~110 meses (~9.2 años)
 # El hazard es fuertemente creciente.
 # Cuanto más dura un conflicto UCDP, más probable es que termine.
@@ -979,16 +741,7 @@ m_exp_phase_ucdp <- survreg(
   data = ucdp,
   dist = "exponential"
 )
-broom::tidy(m_exp_phase_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_phase_ucdp)
 # Durante la bipolaridad, la duración típica de un conflicto UCDP es ~219 meses (~18.2 años)
 # En ruptura sistema los conflictos duran ~39% menos que en la bipolaridad, pero el efecto NO es significativo.
 # En Unipolaridad temprana los conflictos duran ~64% menos que en la bipolaridad. Efecto muy fuerte y altamente significativo. - ~79 meses
@@ -999,16 +752,7 @@ broom::tidy(m_exp_phase_ucdp, conf.int = TRUE) |>
 ```{r}
 # Weibull
 m_wei_phase_ucdp <- survreg(Surv(months) ~ phase, data = ucdp, dist = "weibull")
-broom::tidy(m_wei_phase_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_phase_ucdp)
 
 # Durante la bipolaridad, la duración típica de un conflicto UCDP es ~156 meses (~13 años).
 # Ruptura del sistema Los conflictos duran ~39% menos que en la bipolaridad, pero el efecto NO es significativo.
@@ -1020,16 +764,7 @@ broom::tidy(m_wei_phase_ucdp, conf.int = TRUE) |>
 
 ```{r}
 m_cox_phase_ucdp <- coxph(Surv(months) ~ phase, data = ucdp)
-broom::tidy(m_cox_phase_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_phase_ucdp)
 # Ruptura del sistema los conflictos duran ~37% menos que en la bipolaridad, pero el efecto NO es significativo
 # Unipolaridad temprana los conflictos duran ~53% menos que en la bipolaridad. Efecto fuerte y altamente significativo
 # Unipolaridad tardía Los conflictos duran ~65% menos que en la bipolaridad. Efecto masivo y extremadamente significativo
@@ -1037,11 +772,19 @@ broom::tidy(m_cox_phase_ucdp, conf.int = TRUE) |>
 # Concordance = 0.57. predice mejor que el azar y captura estructura temporal real.
 ```
 
+En el modelo Cox por fases, la unipolaridad temprana reduce la duración 
+un 53% respecto a la bipolaridad y la unipolaridad tardía un 65%, ambas 
+altamente significativas. La ruptura del sistema muestra una reducción 
+del 37% pero no significativa. El índice de concordancia (0,57) indica 
+capacidad predictiva superior al azar.
+
 ```{r}
 cox.zph(m_cox_phase_ucdp)
 # Riesgos proporcionales (PH): el efecto de cada fase debe ser constante en el tiempo.
 # El modelo Cox con fase para UCDP viola el supuesto de riesgos proporcionales.
 ```
+
+El test de Schoenfeld indica violación del supuesto de riesgos proporcionales: el efecto de las fases no es constante en el tiempo. La especificación Weibull es preferible para UCDP.
 
 ### Modelo B — Shocks históricos (1945 y 1991)
 
@@ -1052,20 +795,13 @@ m_exp_45_ucdp <- survreg(
   data = ucdp,
   dist = "exponential"
 )
-broom::tidy(m_exp_45_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_45_ucdp)
 # La media de duracion de conflicto pre shock es de 83 meses.
 # Post shock 2.07 veces mas que la base ~172 meses.
 # No significativo
 ```
+
+El shock de 1945 no produce un efecto significativo bajo especificación  Exponencial. La duración media pre-shock es de 83 meses; el modelo estima una duración post-shock 2,07 veces mayor (~172 meses), pero el efecto no es estadísticamente distinguible del azar.
 
 ```{r}
 # Weibull
@@ -1074,16 +810,7 @@ m_wei_45_ucdp <- survreg(
   data = ucdp,
   dist = "weibull"
 )
-broom::tidy(m_wei_45_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_45_ucdp)
 # Hazard altamente creciente 84%
 # Conflictos pre duran 81 meses.
 # Post duran 37% mas. ~111 meses
@@ -1091,24 +818,18 @@ broom::tidy(m_wei_45_ucdp, conf.int = TRUE) |>
 # Global no significativo
 ```
 
+La especificación Weibull confirma hazard creciente (84%). Los conflictos pre-1945 duran aproximadamente 81 meses; post-1945 el modelo estima un 37% más (~111 meses). El efecto no es significativo.
+
 ```{r}
 # Cox
 m_cox_45_ucdp <- coxph(Surv(months) ~ shock_1945, data = ucdp)
-broom::tidy(m_cox_45_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
-# Después de 1945, el hazard es ~24% menor, conflictos algo más largos.
-# NO es significativo
+tabla_surv(m_cox_45_ucdp)
+
 cox.zph(m_cox_45_ucdp)
-# Viola supuestos
+
 ```
+
+En el modelo Cox, el hazard post-1945 es un 24% menor — conflictos levemente más largos — pero el efecto no es significativo. El test de Schoenfeld indica violación del supuesto de proporcionalidad.
 
 ```{r}
 # Exponencial
@@ -1117,22 +838,15 @@ m_exp_91_ucdp <- survreg(
   data = ucdp,
   dist = "exponential"
 )
-broom::tidy(m_exp_91_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_91_ucdp)
 # Hazard constante.
 # Pre 1991, conflictos duran una media de 221 meses.
 # Post 1991, conflictos duran un 70% menos. ~66 meses
 # Es significativo el shock.
 # Significancia global.
 ```
+
+El shock de 1991 es significativo bajo especificación Exponencial. Los conflictos pre-1991 duran una media de 221 meses; post-1991 la duración cae un 70%, a aproximadamente 66 meses.
 
 ```{r}
 # Weibull
@@ -1141,44 +855,34 @@ m_wei_91_ucdp <- survreg(
   data = ucdp,
   dist = "weibull"
 )
-broom::tidy(m_wei_91_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_91_ucdp)
 # Hazard creciente 73%
 # Pre 1991 156 meses. Post 70% menos ~47 meses
 # Es significativo
 ```
 
+La especificación Weibull confirma hazard creciente (73%) y efecto 
+significativo: los conflictos pre-1991 duran aproximadamente 156 meses; 
+post-1991 la duración cae un 70% (~47 meses).
+
 ```{r}
 # Cox
 m_cox_91_ucdp <- coxph(Surv(months) ~ shock_1991, data = ucdp)
-broom::tidy(m_cox_91_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_91_ucdp)
 # Post 1991, el hazard es 2.37 veces mayor, lo que significa que los conflictos duran muchísimo menos
 # Es significativo
 # Predice mejor q el azar. Concordance >0.5
 ```
 
+
+
 ```{r}
 cox.zph(m_cox_91_ucdp)
-# Viola supuesto de Hazar Proporcionales (cada etapa debe mantener el hazar constante).
+# Viola supuesto de Hazard Proporcionales (cada etapa debe mantener el hazard constante).
 # Weibull mejor modelo.
 ```
+
+Post-1991 el hazard es 2,37 veces mayor — los conflictos terminan significativamente más rápido. El índice de concordancia supera 0,5. El test de Schoenfeld indica violación del supuesto de proporcionalidad; la especificación Weibull es preferible.
 
 ### Modelo C — Rimland vs. no‑Rimland
 
@@ -1189,61 +893,40 @@ m_exp_rim_ucdp <- survreg(
   data = ucdp,
   dist = "exponential"
 )
-broom::tidy(m_exp_rim_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_rim_ucdp)
 # Media fuera de Rimland 160 meses.
 # Rimland 12% mas que fuera ~180 meses.
 # No significativo
 
 ```
 
+El Rimland no produce efecto significativo sobre la duración bajo especificación Exponencial. La duración media fuera del Rimland es de 160 meses; en el Rimland el modelo estima un 12% más (~180 meses).
+
 ```{r}
 # Weibull
 m_wei_rim_ucdp <- survreg(Surv(months) ~ rimland, data = ucdp, dist = "weibull")
-broom::tidy(m_wei_rim_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
-# Hazar creciente 84%.
+tabla_surv(m_wei_rim_ucdp)
+# Hazard: sigma = 1.84 -> k = 0.54, decreciente.
 # Media fuera Rimland 101 meses. 17% mas en Rimland ~118 meses.
 # No es significativo.
 ```
 
+La especificación Weibull confirma hazard creciente (84%). El Rimland 
+no es significativo: duración estimada fuera del Rimland 101 meses, 
+en el Rimland 17% más (~118 meses).
+
 ```{r}
 # Cox
 m_cox_rim_ucdp <- coxph(Surv(months) ~ rimland, data = ucdp)
-broom::tidy(m_cox_rim_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
-# En Rimland  los conflictos duran 14% menos.
-# No significativo
-# Apenas mejor q el azar
+tabla_surv(m_cox_rim_ucdp)
+
 
 cox.zph(m_cox_rim_ucdp)
 # No viola supuestos.
 # Constante en el tiempo. No viola supuestos
 ```
+
+En el modelo Cox, los conflictos en el Rimland duran un 14% menos, pero el efecto no es significativo y el modelo apenas supera el azar. El test de Schoenfeld no detecta violación del supuesto de proporcionalidad.
 
 ### Modelo combinado — Fases + shocks históricos + Rimland
 
@@ -1253,16 +936,7 @@ m_exp_full_ucdp <- survreg(
   data = ucdp,
   dist = "exponential"
 )
-broom::tidy(m_exp_full_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_exp_full_ucdp)
 ```
 
 ```{r}
@@ -1271,16 +945,7 @@ m_wei_full_ucdp <- survreg(
   data = ucdp,
   dist = "weibull"
 )
-broom::tidy(m_wei_full_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_wei_full_ucdp)
 ```
 
 ```{r}
@@ -1288,16 +953,7 @@ m_cox_full_ucdp <- coxph(
   Surv(months) ~ phase + shock_1991 + shock_1945 + rimland,
   data = ucdp
 )
-broom::tidy(m_cox_full_ucdp, conf.int = TRUE) |>
-  select(term, estimate, p.value, conf.low, conf.high) |>
-  mutate(
-    TR = exp(estimate),
-    HR = exp(-estimate),
-    conf.low.TR = exp(conf.low),
-    conf.high.TR = exp(conf.high)
-  ) |>
-  select(term, estimate, TR, HR, p.value, conf.low.TR, conf.high.TR) |>
-  knitr::kable(digits = 3)
+tabla_surv(m_cox_full_ucdp)
 cox.zph(m_cox_full_ucdp)
 ```
 
